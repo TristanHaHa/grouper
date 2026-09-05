@@ -1,0 +1,6 @@
+{
+  "name": "Mario Kart - Grouper Simulator",
+  "description": "Interactive 3D theme park ride station simulator for Mario Kart. Take control in your position as the ride Grouper, managing queue lines, grouping guests into karts 1–8, checking lap bars, and dispatching trains.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
