@@ -8,15 +8,15 @@ export interface KeybindItem {
 }
 
 export const KEYBIND_DEFINITIONS: KeybindItem[] = [
-  // 1-8 Gates
-  { id: 'gate1', label: 'Gate 1 (Car 1, Row 1)', category: 'gate', description: 'Select/Deselect Gate 1 during grouping stage' },
-  { id: 'gate2', label: 'Gate 2 (Car 1, Row 2)', category: 'gate', description: 'Select/Deselect Gate 2 during grouping stage' },
-  { id: 'gate3', label: 'Gate 3 (Car 2, Row 1)', category: 'gate', description: 'Select/Deselect Gate 3 during grouping stage' },
-  { id: 'gate4', label: 'Gate 4 (Car 2, Row 2)', category: 'gate', description: 'Select/Deselect Gate 4 during grouping stage' },
-  { id: 'gate5', label: 'Gate 5 (Car 3, Row 1)', category: 'gate', description: 'Select/Deselect Gate 5 during grouping stage' },
-  { id: 'gate6', label: 'Gate 6 (Car 3, Row 2)', category: 'gate', description: 'Select/Deselect Gate 6 during grouping stage' },
-  { id: 'gate7', label: 'Gate 7 (Car 4, Row 1)', category: 'gate', description: 'Select/Deselect Gate 7 during grouping stage' },
-  { id: 'gate8', label: 'Gate 8 (Car 4, Row 2)', category: 'gate', description: 'Select/Deselect Gate 8 during grouping stage' },
+  // 1-8 Gates (1 gate selected at once)
+  { id: 'gate1', label: 'Gate 1 (Car 1, Row 1)', category: 'gate', description: 'Select Gate 1 (1 gate selected at once)' },
+  { id: 'gate2', label: 'Gate 2 (Car 1, Row 2)', category: 'gate', description: 'Select Gate 2 (1 gate selected at once)' },
+  { id: 'gate3', label: 'Gate 3 (Car 2, Row 1)', category: 'gate', description: 'Select Gate 3 (1 gate selected at once)' },
+  { id: 'gate4', label: 'Gate 4 (Car 2, Row 2)', category: 'gate', description: 'Select Gate 4 (1 gate selected at once)' },
+  { id: 'gate5', label: 'Gate 5 (Car 3, Row 1)', category: 'gate', description: 'Select Gate 5 (1 gate selected at once)' },
+  { id: 'gate6', label: 'Gate 6 (Car 3, Row 2)', category: 'gate', description: 'Select Gate 6 (1 gate selected at once)' },
+  { id: 'gate7', label: 'Gate 7 (Car 4, Row 1)', category: 'gate', description: 'Select Gate 7 (1 gate selected at once)' },
+  { id: 'gate8', label: 'Gate 8 (Car 4, Row 2)', category: 'gate', description: 'Select Gate 8 (1 gate selected at once)' },
 
   // Queue & Grouping Actions
   { id: 'confirmGroup', label: 'Confirm Group (Send to Gates)', category: 'queue', description: 'Finish grouping stage and walk guests to selected gates' },

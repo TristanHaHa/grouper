@@ -40,6 +40,7 @@ export interface SceneCallbacks {
   onDeselect: () => void;
   onTogglePause?: () => void;
   onSwitchKartBank?: (bank: 0 | 1) => void;
+  onCycleGate?: (direction: 1 | -1) => void;
 }
 
 export interface TrainInstance {
@@ -103,6 +104,7 @@ export class RideStation3D {
   private gateIndicators: {
     baseMesh: THREE.Mesh;
     lightMesh: THREE.Mesh;
+    queueLightMesh?: THREE.Mesh;
     labelMesh: THREE.Sprite;
     gateBarrier: THREE.Group;
   }[] = [];
@@ -687,8 +689,9 @@ export class RideStation3D {
     this.gateIndicators = [];
     this.gateGhostHighlights = [];
 
-    const padGeo = new THREE.PlaneGeometry(1.1, 1.2);
-    const frameGeo = new THREE.BoxGeometry(1.2, 0.04, 1.3);
+    const padGeo = new THREE.PlaneGeometry(0.8, 1.15);
+    const queuePadGeo = new THREE.PlaneGeometry(0.65, 1.15);
+    const frameGeo = new THREE.BoxGeometry(1.68, 0.04, 1.3);
     const frameMat = new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.8, roughness: 0.3 });
 
     for (let i = 0; i < GATE_COUNT; i++) {
@@ -696,13 +699,13 @@ export class RideStation3D {
       const gateGroup = new THREE.Group();
       gateGroup.position.set(GATE_LINE_X, 0, zPos);
 
-      // Metal border frame
+      // Metal border frame encompassing front row and queue row
       const frame = new THREE.Mesh(frameGeo, frameMat);
-      frame.position.set(0, 0.02, 0);
+      frame.position.set(0.325, 0.02, 0);
       frame.receiveShadow = true;
       gateGroup.add(frame);
 
-      // LED Floor Light (starts Red for 0/2)
+      // LED Floor Light (Front Row: Ready for train, starts Red for 0/2)
       const ledMat = new THREE.MeshStandardMaterial({
         color: '#ef4444',
         emissive: '#dc2626',
@@ -715,11 +718,25 @@ export class RideStation3D {
       ledPad.name = `gate_${i}`;
       gateGroup.add(ledPad);
 
-      // Register for raycasting
+      // LED Floor Light (Queue Row: Standing behind front row)
+      const queueLedMat = new THREE.MeshStandardMaterial({
+        color: '#1e293b',
+        emissive: '#0f172a',
+        emissiveIntensity: 0.5,
+        roughness: 0.4,
+      });
+      const queueLedPad = new THREE.Mesh(queuePadGeo, queueLedMat);
+      queueLedPad.rotation.x = -Math.PI / 2;
+      queueLedPad.position.set(0.65, 0.044, 0);
+      queueLedPad.name = `gate_${i}`;
+      gateGroup.add(queueLedPad);
+
+      // Register both pads for raycasting
       this.interactables.push(ledPad);
+      this.interactables.push(queueLedPad);
 
       // Ghost highlight mesh for hover preview (starts invisible)
-      const ghostGeo = new THREE.PlaneGeometry(1.15, 1.25);
+      const ghostGeo = new THREE.PlaneGeometry(1.68, 1.25);
       const ghostMat = new THREE.MeshBasicMaterial({
         color: '#38bdf8',
         transparent: true,
@@ -728,7 +745,7 @@ export class RideStation3D {
       });
       const ghostMesh = new THREE.Mesh(ghostGeo, ghostMat);
       ghostMesh.rotation.x = -Math.PI / 2;
-      ghostMesh.position.set(0, 0.055, 0);
+      ghostMesh.position.set(0.325, 0.055, 0);
       gateGroup.add(ghostMesh);
       this.gateGhostHighlights.push(ghostMesh);
 
@@ -776,7 +793,7 @@ export class RideStation3D {
       gCtx.fillText(`GATE 0${i + 1}`, 128, 48);
       gCtx.fillStyle = '#ef4444';
       gCtx.font = 'bold 32px "JetBrains Mono", monospace';
-      gCtx.fillText(`0 / 2`, 128, 92);
+      gCtx.fillText(`0 / 4`, 128, 92);
 
       const signTexture = new THREE.CanvasTexture(gateSignCanvas);
       const spriteMat = new THREE.SpriteMaterial({ map: signTexture });
@@ -788,6 +805,7 @@ export class RideStation3D {
       this.gateIndicators.push({
         baseMesh: frame,
         lightMesh: ledPad,
+        queueLightMesh: queueLedPad,
         labelMesh: sprite,
         gateBarrier: barrierGroup,
       });
@@ -860,8 +878,10 @@ export class RideStation3D {
     this.mainQueueBadge = new THREE.Sprite(new THREE.SpriteMaterial({ map: mainBadgeTex }));
     this.mainQueueBadge.position.set(MAIN_QUEUE_STOP_X, 2.5, MAIN_QUEUE_STOP_Z);
     this.mainQueueBadge.scale.set(2.4, 0.85, 1);
+    this.mainQueueBadge.name = 'main_queue_stop';
     this.mainQueueGroup.add(this.mainQueueBadge);
     this.scene.add(this.mainQueueGroup);
+    this.interactables.push(this.mainQueueBadge);
 
     // 2. Single Rider Queue at Z = -2.0
     for (let z = SINGLE_QUEUE_STOP_Z; z >= SINGLE_QUEUE_STOP_Z - 6; z -= 1.5) {
@@ -920,8 +940,10 @@ export class RideStation3D {
     this.singleQueueBadge = new THREE.Sprite(new THREE.SpriteMaterial({ map: singleBadgeTex }));
     this.singleQueueBadge.position.set(SINGLE_QUEUE_STOP_X, 2.5, SINGLE_QUEUE_STOP_Z);
     this.singleQueueBadge.scale.set(2.4, 0.85, 1);
+    this.singleQueueBadge.name = 'single_queue_stop';
     this.singleQueueGroup.add(this.singleQueueBadge);
     this.scene.add(this.singleQueueGroup);
+    this.interactables.push(this.singleQueueBadge);
   }
 
   // --- Control Console Podium ---
@@ -1023,8 +1045,9 @@ export class RideStation3D {
   public updateConsoleScreen() {
     if (!this.consoleCanvas || !this.consoleTexture) return;
     const ctx = this.consoleCanvas.getContext('2d')!;
-    const totalFilled = this.gatesState.reduce((acc, g) => acc + (g.occupants?.length || 0), 0);
-    const efficiency = Math.round((totalFilled / 16) * 100);
+    const boardingSeats = this.gatesState.reduce((acc, g) => acc + Math.min(2, g.occupants?.length || 0), 0);
+    const queuedGuests = this.gatesState.reduce((acc, g) => acc + Math.max(0, (g.occupants?.length || 0) - 2), 0);
+    const efficiency = Math.round((boardingSeats / 16) * 100);
 
     // Background
     ctx.fillStyle = '#090d16';
@@ -1066,13 +1089,14 @@ export class RideStation3D {
     // Train Fill Bar
     ctx.fillStyle = '#1e293b';
     ctx.fillRect(24, 95, 464, 30);
-    const barWidth = (totalFilled / 16) * 464;
-    ctx.fillStyle = totalFilled === 16 ? '#10b981' : totalFilled > 8 ? '#f59e0b' : '#38bdf8';
+    const barWidth = (boardingSeats / 16) * 464;
+    ctx.fillStyle = boardingSeats === 16 ? '#10b981' : boardingSeats > 8 ? '#f59e0b' : '#38bdf8';
     ctx.fillRect(24, 95, barWidth, 30);
 
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 20px "JetBrains Mono", monospace';
-    ctx.fillText(`SEATS: ${totalFilled} / 16 (${efficiency}%)`, 34, 117);
+    const queueNote = queuedGuests > 0 ? ` (+${queuedGuests} Q)` : '';
+    ctx.fillText(`SEATS: ${boardingSeats} / 16 (${efficiency}%)${queueNote}`, 34, 117);
 
     // Patience Meter / Zen Mode Display
     ctx.fillStyle = '#94a3b8';
@@ -1107,8 +1131,8 @@ export class RideStation3D {
       const x = 24 + i * (cellW + 6);
       const y = 250;
 
-      ctx.fillStyle = occ === 2 ? '#065f46' : occ === 1 ? '#78350f' : '#1e293b';
-      ctx.strokeStyle = occ === 2 ? '#10b981' : occ === 1 ? '#f59e0b' : '#475569';
+      ctx.fillStyle = occ >= 4 ? '#0c4a6e' : occ >= 2 ? '#065f46' : occ === 1 ? '#78350f' : '#1e293b';
+      ctx.strokeStyle = occ >= 4 ? '#38bdf8' : occ >= 2 ? '#10b981' : occ === 1 ? '#f59e0b' : '#475569';
       ctx.lineWidth = 2;
       ctx.fillRect(x, y, cellW, 55);
       ctx.strokeRect(x, y, cellW, 55);
@@ -1117,9 +1141,9 @@ export class RideStation3D {
       ctx.font = 'bold 18px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.fillText(`G${i + 1}`, x + cellW / 2, y + 24);
-      ctx.fillStyle = occ === 2 ? '#34d399' : occ === 1 ? '#fbbf24' : '#64748b';
+      ctx.fillStyle = occ >= 4 ? '#38bdf8' : occ >= 2 ? '#34d399' : occ === 1 ? '#fbbf24' : '#64748b';
       ctx.font = '16px "JetBrains Mono", monospace';
-      ctx.fillText(`${occ}/2`, x + cellW / 2, y + 46);
+      ctx.fillText(`${occ}/4`, x + cellW / 2, y + 46);
     }
     ctx.textAlign = 'left';
 
@@ -1352,18 +1376,22 @@ export class RideStation3D {
       npc.isWalking = true;
       const startPos = mesh.position.clone();
       const gateZ = GATE_Z_POSITIONS[assign.gateIndex];
-      const slotZOffset = assign.seatSlot === 0 ? 0.28 : -0.28;
+      // Front row: slot 0 & 1 at GATE_LINE_X
+      // Queue row behind: slot 2 & 3 at GATE_LINE_X + 0.65
+      const isQueueRow = assign.seatSlot >= 2;
+      const slotZOffset = (assign.seatSlot % 2 === 0) ? 0.28 : -0.28;
+      const targetX = isQueueRow ? (GATE_LINE_X + 0.65) : GATE_LINE_X;
 
       // NavMesh Waypoints:
       // Point 0: Current queue position
       // Point 1: Step out into station aisle at X = 0.8, start Z
       // Point 2: Walk down aisle to X = 0.8, target gate Z
-      // Point 3: Step onto gate floor pad at X = GATE_LINE_X, gate Z + slotZOffset
+      // Point 3: Step onto gate floor pad at X = targetX, gate Z + slotZOffset
       const waypoints = [
         startPos,
         new THREE.Vector3(0.8, 0, startPos.z),
         new THREE.Vector3(0.8, 0, gateZ),
-        new THREE.Vector3(GATE_LINE_X, 0, gateZ + slotZOffset),
+        new THREE.Vector3(targetX, 0, gateZ + slotZOffset),
       ];
 
       this.walkingNPCs.push({
@@ -1375,7 +1403,7 @@ export class RideStation3D {
         speed: 4.8 + Math.random() * 0.6,
         onComplete: () => {
           npc.isWalking = false;
-          mesh!.position.set(GATE_LINE_X, 0, gateZ + slotZOffset);
+          mesh!.position.set(targetX, 0, gateZ + slotZOffset);
           mesh!.rotation.y = -Math.PI / 2; // Face towards the train tracks
         },
       });
@@ -1414,19 +1442,40 @@ export class RideStation3D {
       if (!g || !ind) continue;
 
       const occCount = g.occupants ? g.occupants.length : 0;
-      let col = '#ef4444';
-      let emissive = '#dc2626';
+      const frontCount = Math.min(2, occCount);
+      const queueCount = Math.max(0, occCount - 2);
 
-      if (occCount === 1) {
-        col = '#f59e0b';
-        emissive = '#d97706';
-      } else if (occCount === 2) {
-        col = '#10b981';
-        emissive = '#059669';
+      // Front row light (Ready for train)
+      let frontCol = '#ef4444';
+      let frontEmissive = '#dc2626';
+      if (frontCount === 1) {
+        frontCol = '#f59e0b';
+        frontEmissive = '#d97706';
+      } else if (frontCount === 2) {
+        frontCol = '#10b981';
+        frontEmissive = '#059669';
       }
 
-      (ind.lightMesh.material as THREE.MeshStandardMaterial).color.set(col);
-      (ind.lightMesh.material as THREE.MeshStandardMaterial).emissive.set(emissive);
+      (ind.lightMesh.material as THREE.MeshStandardMaterial).color.set(frontCol);
+      (ind.lightMesh.material as THREE.MeshStandardMaterial).emissive.set(frontEmissive);
+
+      // Queue row floor light (Behind front row)
+      if (ind.queueLightMesh) {
+        let queueCol = '#1e293b';
+        let queueEmissive = '#0f172a';
+        if (queueCount === 1) {
+          queueCol = '#f59e0b';
+          queueEmissive = '#b45309';
+        } else if (queueCount === 2) {
+          queueCol = '#38bdf8';
+          queueEmissive = '#0284c7';
+        }
+        (ind.queueLightMesh.material as THREE.MeshStandardMaterial).color.set(queueCol);
+        (ind.queueLightMesh.material as THREE.MeshStandardMaterial).emissive.set(queueEmissive);
+      }
+
+      // Border and accent color for overhead sign
+      const headerBorderCol = occCount === 4 ? '#38bdf8' : frontCount === 2 ? '#10b981' : frontCount === 1 ? '#f59e0b' : '#ef4444';
 
       // Redraw overhead gate label
       const gCanvas = document.createElement('canvas');
@@ -1435,17 +1484,17 @@ export class RideStation3D {
       const ctx = gCanvas.getContext('2d')!;
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(0, 0, 256, 128);
-      ctx.strokeStyle = col;
+      ctx.strokeStyle = headerBorderCol;
       ctx.lineWidth = 8;
       ctx.strokeRect(4, 4, 248, 120);
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 50px "Chakra Petch", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`GATE 0${i + 1}`, 128, 48);
-      ctx.fillStyle = col;
-      ctx.font = 'bold 34px "JetBrains Mono", monospace';
-      ctx.fillText(`${occCount} / 2`, 128, 92);
+      ctx.fillText(`GATE 0${i + 1}`, 128, 44);
+      ctx.fillStyle = headerBorderCol;
+      ctx.font = 'bold 32px "JetBrains Mono", monospace';
+      ctx.fillText(`${occCount} / 4`, 128, 88);
 
       const tex = new THREE.CanvasTexture(gCanvas);
       ind.labelMesh.material.map = tex;
@@ -1480,7 +1529,7 @@ export class RideStation3D {
     for (let i = hoverGateIndex; i < GATE_COUNT; i++) {
       const g = this.gatesState[i];
       const occ = g ? g.occupants.length : 0;
-      const free = 2 - occ;
+      const free = 4 - occ;
       tempRemaining -= free;
       if (tempRemaining <= 0) break;
     }
@@ -1490,7 +1539,7 @@ export class RideStation3D {
     for (let i = hoverGateIndex; i < GATE_COUNT; i++) {
       const g = this.gatesState[i];
       const occ = g ? g.occupants.length : 0;
-      const free = 2 - occ;
+      const free = 4 - occ;
       if (free <= 0 && remaining > 0) {
         continue;
       }
@@ -1517,14 +1566,17 @@ export class RideStation3D {
 
     const activeTrainGroup = this.activeTrain?.group || this.trainGroup;
 
-    // Move sitting NPCs into vehicle seat slots
+    // Move sitting NPCs into vehicle seat slots, and advance queue riders forward
     this.gatesState.forEach((g, gIdx) => {
       const vIdx = Math.floor(gIdx / 2);
       const rowInCar = gIdx % 2; // 0 is front row, 1 is rear row
       const zRowOffset = rowInCar === 0 ? 0.65 : -0.65;
       const vCenterZ = VEHICLE_Z_CENTERS[vIdx];
+      const gateZ = GATE_Z_POSITIONS[gIdx];
 
-      g.occupants.forEach((npc, slotIdx) => {
+      // Front 2 occupants board the train
+      const boardingOccupants = g.occupants.slice(0, 2);
+      boardingOccupants.forEach((npc, slotIdx) => {
         const mesh = this.npcMeshes.get(npc.id);
         if (mesh) {
           mesh.userData.isRider = true;
@@ -1538,6 +1590,31 @@ export class RideStation3D {
           const rightLeg = mesh.getObjectByName('rightLeg');
           if (leftLeg) leftLeg.rotation.x = Math.PI / 2.2;
           if (rightLeg) rightLeg.rotation.x = Math.PI / 2.2;
+        }
+      });
+
+      // Queued occupants (slots 2 & 3) automatically move up to the front row!
+      const waitingOccupants = g.occupants.slice(2);
+      waitingOccupants.forEach((npc, newSlot) => {
+        const mesh = this.npcMeshes.get(npc.id);
+        if (mesh) {
+          const newZOffset = newSlot === 0 ? 0.28 : -0.28;
+          const startWalkPos = mesh.position.clone();
+          const targetWalkPos = new THREE.Vector3(GATE_LINE_X, 0, gateZ + newZOffset);
+          npc.isWalking = true;
+          this.walkingNPCs.push({
+            npc,
+            mesh,
+            waypoints: [startWalkPos, targetWalkPos],
+            currentSegment: 0,
+            segmentProgress: 0,
+            speed: 3.2,
+            onComplete: () => {
+              npc.isWalking = false;
+              mesh!.position.copy(targetWalkPos);
+              mesh!.rotation.y = -Math.PI / 2;
+            },
+          });
         }
       });
     });
@@ -1741,7 +1818,7 @@ export class RideStation3D {
     dom.addEventListener('click', (e) => {
       if (this.isPaused) return;
       if (e.button !== 0) return;
-      this.handleInteractionClick();
+      this.handleInteractionClick(e);
     });
 
     // Right Click to confirm grouping stage and let the group go
@@ -1750,27 +1827,21 @@ export class RideStation3D {
       this.callbacks.onConfirmGrouping?.();
     });
 
-    // Mouse buttons: 2 = Right Click, 3 = Back (Karts 1-2), 4 = Forward (Karts 3-4)
+    // Mouse buttons: 2 = Right Click, 3 = Back (Gate -1), 4 = Forward (Gate +1)
     dom.addEventListener('mousedown', (e) => {
       if (e.button === 2) {
         e.preventDefault();
         this.callbacks.onConfirmGrouping?.();
       } else if (e.button === 4) {
-        // Forward button: select karts 3-4 (no wrapping)
+        // Forward button: cycle to next gate
         e.preventDefault();
         e.stopPropagation();
-        if (this.activeKartBank !== 1) {
-          this.activeKartBank = 1;
-          this.callbacks.onSwitchKartBank?.(1);
-        }
+        this.callbacks.onCycleGate?.(1);
       } else if (e.button === 3) {
-        // Back button: select karts 1-2 (no wrapping)
+        // Back button: cycle to previous gate
         e.preventDefault();
         e.stopPropagation();
-        if (this.activeKartBank !== 0) {
-          this.activeKartBank = 0;
-          this.callbacks.onSwitchKartBank?.(0);
-        }
+        this.callbacks.onCycleGate?.(-1);
       }
     });
 
@@ -1909,20 +1980,62 @@ export class RideStation3D {
     }
   }
 
-  private handleInteractionClick() {
+  private handleInteractionClick(e?: MouseEvent) {
+    // 1. Direct crosshair target check
     if (this.currentHoverTarget.type === 'main_queue') {
-      if (!this.selectedGroup) {
-        this.callbacks.onSelectMainQueue();
-      }
-    } else if (this.currentHoverTarget.type === 'single_queue') {
-      if (!this.selectedGroup) {
-        this.callbacks.onSelectSingleQueue();
-      }
-    } else if (this.currentHoverTarget.type === 'gate' && this.currentHoverTarget.index !== undefined) {
-      this.callbacks.onAssignToGate(this.currentHoverTarget.index);
-    } else if (this.currentHoverTarget.type === 'dispatch_button') {
-      this.callbacks.onTriggerDispatch();
+      this.callbacks.onSelectMainQueue();
+      return;
     }
+    if (this.currentHoverTarget.type === 'single_queue') {
+      this.callbacks.onSelectSingleQueue();
+      return;
+    }
+    if (this.currentHoverTarget.type === 'dispatch_button') {
+      this.callbacks.onTriggerDispatch();
+      return;
+    }
+
+    // 2. If pointer is not locked and cursor click event is available, raycast under cursor
+    if (e && !this.isPointerLocked) {
+      const rect = this.container.getBoundingClientRect();
+      const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      const clickRaycaster = new THREE.Raycaster();
+      clickRaycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), this.camera);
+      const hits = clickRaycaster.intersectObjects(this.interactables, false);
+      if (hits.length > 0) {
+        const hitName = hits[0].object.name;
+        if (hitName === 'main_queue_stop') {
+          this.callbacks.onSelectMainQueue();
+          return;
+        }
+        if (hitName === 'single_queue_stop') {
+          this.callbacks.onSelectSingleQueue();
+          return;
+        }
+        if (hitName === 'dispatch_button') {
+          this.callbacks.onTriggerDispatch();
+          return;
+        }
+      }
+    }
+
+    // 3. Directional check: if user left-clicks while looking towards the queue entrance (dir.x > 0.05)
+    // Left-click selects the queue in that field of view
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    if (dir.x > 0.05) {
+      if (dir.z >= 0) {
+        // Looking towards positive Z: Main Line
+        this.callbacks.onSelectMainQueue();
+        return;
+      } else {
+        // Looking towards negative Z: Single Rider Line
+        this.callbacks.onSelectSingleQueue();
+        return;
+      }
+    }
+    // GATES ARE NEVER SELECTED VIA CLICK OR INTERACT KEY!
   }
 
   // --- Raycast Target Evaluation ---
@@ -1941,14 +2054,14 @@ export class RideStation3D {
         newTarget = {
           type: 'main_queue',
           label: 'MAIN QUEUE STOP LINE',
-          description: this.selectedGroup ? 'Switch to Main Group' : 'Call Next Main Group [E / Click]',
+          description: this.selectedGroup ? 'Switch to Main Queue [Left Click]' : 'Call Main Queue [Left Click]',
           isValid: true,
         };
       } else if (hitName === 'single_queue_stop') {
         newTarget = {
           type: 'single_queue',
           label: 'SINGLE RIDER STOP LINE',
-          description: this.selectedGroup ? 'Switch to Single Rider' : 'Call Solo Rider [E / Click]',
+          description: this.selectedGroup ? 'Switch to Single Rider [Left Click]' : 'Call Single Rider [Left Click]',
           isValid: true,
         };
       } else if (hitName.startsWith('gate_')) {
@@ -1958,27 +2071,19 @@ export class RideStation3D {
         const occ = gate ? gate.occupants.length : 0;
 
         if (this.selectedGroup) {
-          const isGateInActiveBank = (this.activeKartBank === 0 && gateIdx < 4) || (this.activeKartBank === 1 && gateIdx >= 4);
-          const keyNumber = gateIdx < 4 ? gateIdx + 1 : gateIdx - 3;
-          const hotkeyHint = isGateInActiveBank
-            ? `[Key ${keyNumber} or Click]`
-            : gateIdx < 4
-            ? '[Switch: Mouse Back]'
-            : '[Switch: Mouse Forward]';
-
           newTarget = {
             type: 'gate',
             index: gateIdx,
-            label: `GATE 0${gateIdx + 1} (${occ}/2)`,
-            description: `Assign Group of ${this.selectedGroup.size} to Gate ${gateIdx + 1} ${hotkeyHint}`,
+            label: `GATE 0${gateIdx + 1} (${occ}/4)`,
+            description: `Assign to Gate ${gateIdx + 1}: Key [${gateIdx + 1}] • Forward/Back to Cycle Gate`,
             isValid: true,
           };
         } else {
           newTarget = {
             type: 'gate',
             index: gateIdx,
-            label: `GATE 0${gateIdx + 1} (${occ}/2)`,
-            description: `Select a group from Main or Single queue first!`,
+            label: `GATE 0${gateIdx + 1} (${occ}/4)`,
+            description: `Call Main or Single queue first with Left Click`,
             isValid: false,
           };
         }

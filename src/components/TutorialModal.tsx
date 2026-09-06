@@ -47,12 +47,13 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({ onClose }) => {
               Sequential Gate Assignment Rule
             </h4>
             <p className="text-xs text-neutral-400 leading-relaxed mb-2">
-              Each gate holds <strong>2 occupants</strong>. When a group of size $N$ is placed at Gate $G$, members fill available seats sequentially across Gates $G, G+1, \dots$
+              Each gate has a queue capacity of <strong>4 occupants</strong> (the front 2 board the current train, and 2 can queue behind them). When the first 2 get dispatched, the queued riders automatically move up to the front!
             </p>
             <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 font-mono text-[11px] text-neutral-300 space-y-1">
-              <div className="text-sky-300 font-bold">Example:</div>
-              <div>• Group of 3 assigned to Gate 1 → <strong>Gate 1 gets 2 members</strong>, <strong>Gate 2 gets 1 member</strong>.</div>
-              <div>• Now Gate 2 has 1 open seat remaining! Use a <span className="text-cyan-400 font-bold">Single Rider (1)</span> to perfectly fill Gate 2!</div>
+              <div className="text-sky-300 font-bold">Queueing Example:</div>
+              <div>• Assign 2 guests to Gate 1 → <strong>Front row fills (2/4)</strong>, ready for the train.</div>
+              <div>• Assign 2 more guests to Gate 1 → <strong>Queue row fills (4/4)</strong> behind them.</div>
+              <div>• On dispatch, the first 2 ride off and the queued 2 automatically advance to the front row!</div>
             </div>
           </div>
 
@@ -76,12 +77,12 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({ onClose }) => {
             </h4>
             <div className="grid grid-cols-2 gap-2 text-[11px]">
               <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
-                <span className="text-neutral-400">1 – 4 Keys:</span>
-                <span className="text-sky-300 font-bold">Select Gate (Active Karts)</span>
+                <span className="text-neutral-400">1 – 8 Keys:</span>
+                <span className="text-sky-300 font-bold">Select Gate (1–8)</span>
               </div>
               <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
                 <span className="text-neutral-400">Mouse Fwd / Back:</span>
-                <span className="text-amber-300 font-bold">Switch Karts (1-2 ⇋ 3-4)</span>
+                <span className="text-amber-300 font-bold">Cycle Gates 1–8 (Wrapping)</span>
               </div>
               <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
                 <span className="text-neutral-400">Right Click / Enter:</span>
@@ -101,7 +102,7 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({ onClose }) => {
               </div>
               <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
                 <span className="text-neutral-400">Left Click:</span>
-                <span className="text-white font-bold">Interact / Select</span>
+                <span className="text-emerald-300 font-bold">Select Main / Single Queue</span>
               </div>
               <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
                 <span className="text-neutral-400">Space:</span>

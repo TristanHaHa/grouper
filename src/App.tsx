@@ -46,7 +46,7 @@ export default function App() {
     Array.from({ length: GATE_COUNT }, (_, i) => ({
       index: i,
       occupants: [],
-      capacity: 2,
+      capacity: 4,
       status: 'empty',
       vehicleIndex: Math.floor(i / 2),
     }))
@@ -222,6 +222,9 @@ export default function App() {
       onSwitchKartBank: (bank) => {
         handleSwitchKartBank(bank);
       },
+      onCycleGate: (direction) => {
+        handleCycleGate(direction);
+      },
     });
 
     sceneRef.current = scene;
@@ -276,81 +279,63 @@ export default function App() {
         return;
       }
 
-      // Toggle active kart bank with Tab key
+      // Tab key: Cycle forward (or Shift+Tab: cycle back)
       if (e.code === 'Tab') {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        handleSwitchKartBank(activeKartBankRef.current === 0 ? 1 : 0);
+        handleCycleGate(e.shiftKey ? -1 : 1);
         return;
       }
 
-      // Forward key (BrowserForward or RightBracket): select karts 3-4 (no wrapping)
+      // Forward key (BrowserForward, RightBracket, ArrowRight): cycle to next gate (wrapping)
       if (
         e.code === 'BrowserForward' ||
         e.key === 'BrowserForward' ||
         e.code === 'BracketRight' ||
-        e.key === ']'
+        e.key === ']' ||
+        e.code === 'ArrowRight'
       ) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        handleSwitchKartBank(1);
+        handleCycleGate(1);
         return;
       }
 
-      // Back key (BrowserBack or LeftBracket): select karts 1-2 (no wrapping)
+      // Back key (BrowserBack, LeftBracket, ArrowLeft): cycle to previous gate (wrapping)
       if (
         e.code === 'BrowserBack' ||
         e.key === 'BrowserBack' ||
         e.code === 'BracketLeft' ||
-        e.key === '['
+        e.key === '[' ||
+        e.code === 'ArrowLeft'
       ) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        handleSwitchKartBank(0);
+        handleCycleGate(-1);
         return;
       }
 
-      // Direct check for numeric keys '1' through '4'
-      // When Karts 1-2 are active (activeKartBankRef.current === 0):
-      //   Key 1 -> Gate 1 (index 0)
-      //   Key 2 -> Gate 2 (index 1)
-      //   Key 3 -> Gate 3 (index 2)
-      //   Key 4 -> Gate 4 (index 3)
-      // When Karts 3-4 are active (activeKartBankRef.current === 1):
-      //   Key 1 -> Gate 5 (index 4)
-      //   Key 2 -> Gate 6 (index 5)
-      //   Key 3 -> Gate 7 (index 6)
-      //   Key 4 -> Gate 8 (index 7)
+      // Direct check for numeric keys '1' through '8' (Gates 1 - 8)
       const keyInt = parseInt(e.key, 10);
-      if (!isNaN(keyInt) && keyInt >= 1 && keyInt <= 4) {
+      if (!isNaN(keyInt) && keyInt >= 1 && keyInt <= 8) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        const baseIndex = activeKartBankRef.current === 0 ? 0 : 4;
-        handleAssignToGate(baseIndex + (keyInt - 1));
+        handleAssignToGate(keyInt - 1);
         return;
       }
 
-      // Check code names Digit1-Digit4 or Numpad1-Numpad4
-      const digitMatch = e.code.match(/^(?:Digit|Numpad)([1-4])$/);
+      // Check code names Digit1-Digit8 or Numpad1-Numpad8
+      const digitMatch = e.code.match(/^(?:Digit|Numpad)([1-8])$/);
       if (digitMatch) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        const slot = parseInt(digitMatch[1], 10) - 1;
-        const baseIndex = activeKartBankRef.current === 0 ? 0 : 4;
-        handleAssignToGate(baseIndex + slot);
-        return;
-      }
-
-      // Explicitly block keys 5-8 from triggering gate assignment
-      if ((!isNaN(keyInt) && keyInt >= 5 && keyInt <= 8) || e.code.match(/^(?:Digit|Numpad)([5-8])$/)) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
+        const gateIdx = parseInt(digitMatch[1], 10) - 1;
+        handleAssignToGate(gateIdx);
         return;
       }
 
@@ -392,41 +377,41 @@ export default function App() {
     };
 
     const handleGlobalPointerDown = (e: PointerEvent) => {
-      // Mouse Forward (button 4): select karts 3-4 (no wrapping)
+      // Mouse Forward (button 4): cycle to next gate
       if (e.button === 4) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        handleSwitchKartBank(1);
+        handleCycleGate(1);
         return;
       }
 
-      // Mouse Back (button 3): select karts 1-2 (no wrapping)
+      // Mouse Back (button 3): cycle to previous gate
       if (e.button === 3) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        handleSwitchKartBank(0);
+        handleCycleGate(-1);
         return;
       }
     };
 
     const handleGlobalMouseDown = (e: MouseEvent) => {
-      // Mouse Forward (button 4): select karts 3-4 (no wrapping)
+      // Mouse Forward (button 4): cycle to next gate
       if (e.button === 4) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        handleSwitchKartBank(1);
+        handleCycleGate(1);
         return;
       }
 
-      // Mouse Back (button 3): select karts 1-2 (no wrapping)
+      // Mouse Back (button 3): cycle to previous gate
       if (e.button === 3) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        handleSwitchKartBank(0);
+        handleCycleGate(-1);
         return;
       }
 
@@ -599,8 +584,8 @@ export default function App() {
     }
   };
 
-  // --- Toggle Gate Selection in Grouping Stage (1-8 Keys / Clicks) ---
-  const handleAssignToGate = (gateIndex: number) => {
+  // --- Cycle Through Gates (Mouse Forward / Back) ---
+  const handleCycleGate = (direction: 1 | -1) => {
     soundEngine.init();
     let group = selectedGroupRef.current;
 
@@ -627,37 +612,101 @@ export default function App() {
       }
     }
 
-    if (!group) return;
+    const curSelected = selectedGateIndicesRef.current;
+    let nextGateIndex: number;
 
-    // 1-4 keys function identically regardless of group size: toggle only this individual gate
-    const curSelected = [...selectedGateIndicesRef.current];
+    if (curSelected.length === 0) {
+      // If nothing selected yet, Mouse Forward selects Gate 1 (0), Back selects Gate 8 (7)
+      nextGateIndex = direction === 1 ? 0 : 7;
+    } else {
+      const currentGate = curSelected[0];
+      // Move 1 gate forward or 1 gate back with wrapping (0-7)
+      nextGateIndex = (currentGate + direction + 8) % 8;
+    }
+
+    handleAssignToGate(nextGateIndex, true);
+  };
+
+  // --- Assign to Single Gate (Keys 1-8, Mouse Click, or Mouse Forward/Back) ---
+  // Exactly 1 gate can be selected at once!
+  const handleAssignToGate = (gateIndex: number, forceSelect: boolean = false) => {
+    soundEngine.init();
+    let group = selectedGroupRef.current;
+
+    // If no group is active, automatically start grouping stage with the front group
+    if (!group) {
+      const curMain = mainQueueRef.current;
+      if (curMain.length > 0) {
+        group = curMain[0];
+        setSelectedGroup(group);
+        selectedGroupRef.current = group;
+        if (sceneRef.current) {
+          sceneRef.current.setSelectedGroup(group);
+        }
+      } else {
+        const curSingle = singleQueueRef.current;
+        if (curSingle.length > 0) {
+          group = curSingle[0];
+          setSelectedGroup(group);
+          selectedGroupRef.current = group;
+          if (sceneRef.current) {
+            sceneRef.current.setSelectedGroup(group);
+          }
+        }
+      }
+    }
+
+    const curSelected = selectedGateIndicesRef.current;
     let newSelected: number[];
 
-    if (curSelected.includes(gateIndex)) {
-      // Toggle off / deselect this gate
-      newSelected = curSelected.filter((idx) => idx !== gateIndex);
+    if (!forceSelect && curSelected.length === 1 && curSelected[0] === gateIndex) {
+      // Toggle off / deselect if pressing the already-selected gate
+      newSelected = [];
       soundEngine.playGateDeselect();
     } else {
-      // Toggle on / select this gate
-      newSelected = [...curSelected, gateIndex];
+      // Select ONLY this single gate (ensures only 1 is selected at once)
+      newSelected = [gateIndex];
       soundEngine.playGateToggle(gateIndex + 1);
+
+      // Automatically sync active kart bank so the UI and 3D scene focus on the kart with the selected gate
+      const targetKartBank: 0 | 1 = gateIndex < 4 ? 0 : 1;
+      if (activeKartBankRef.current !== targetKartBank) {
+        activeKartBankRef.current = targetKartBank;
+        setActiveKartBank(targetKartBank);
+        if (sceneRef.current) {
+          sceneRef.current.setActiveKartBank(targetKartBank);
+        }
+      }
     }
 
     setSelectedGateIndices(newSelected);
     selectedGateIndicesRef.current = newSelected;
 
-    // Calculate how group members distribute across selected gates in ascending gate order
+    // Calculate allocation for this single selected gate (front row 2 seats, then queue row 2 seats)
     const currentGates = gatesRef.current;
     const newPending: { [gateIndex: number]: number } = {};
-    let remainingToPlace = group.size;
 
-    const sortedSelected = [...newSelected].sort((a, b) => a - b);
-    for (const gIdx of sortedSelected) {
+    if (newSelected.length === 1 && group) {
+      const gIdx = newSelected[0];
       const occ = currentGates[gIdx]?.occupants?.length || 0;
-      const freeCapacity = Math.max(0, 2 - occ);
-      const toPlace = Math.min(freeCapacity, remainingToPlace);
-      newPending[gIdx] = toPlace;
-      remainingToPlace -= toPlace;
+      let remainingToPlace = group.size;
+      let allocated = 0;
+
+      // Pass 1: Fill front boarding row (seats 1-2)
+      const boardingCapacity = Math.max(0, 2 - occ);
+      const toBoard = Math.min(boardingCapacity, remainingToPlace);
+      allocated += toBoard;
+      remainingToPlace -= toBoard;
+
+      // Pass 2: Fill queue staging row behind (seats 3-4, max 4 total per gate)
+      if (remainingToPlace > 0) {
+        const queueCapacity = Math.max(0, 4 - (occ + allocated));
+        const toQueue = Math.min(queueCapacity, remainingToPlace);
+        allocated += toQueue;
+        remainingToPlace -= toQueue;
+      }
+
+      newPending[gIdx] = allocated;
     }
 
     setPendingAllocations(newPending);
@@ -680,32 +729,29 @@ export default function App() {
     const curPending = pendingAllocationsRef.current;
     const selectedGatesList = selectedGateIndicesRef.current;
 
-    // Check if grouping confirmation is invalid (no gates, too few seats, too many seats, or unused gate selected)
+    // Check if grouping confirmation is invalid (no gates, too few seats, or unused gate selected)
     const totalAllocated = (Object.values(curPending) as number[]).reduce(
       (acc, val) => acc + val,
       0
     );
 
-    // Calculate total available free capacity across all selected gates
-    const currentGates = gatesRef.current;
-    const totalCapacitySelected = selectedGatesList.reduce((sum, gIdx) => {
-      const occ = currentGates[gIdx]?.occupants?.length || 0;
-      return sum + Math.max(0, 2 - occ);
-    }, 0);
-
-    const hasUnusedSelectedGate = selectedGatesList.some((gIdx) => (curPending[gIdx] || 0) <= 0);
-    const hasExcessSeats = totalCapacitySelected - group.size >= 2;
-
     const isInvalid =
       selectedGatesList.length === 0 ||
       totalAllocated < group.size ||
-      hasUnusedSelectedGate ||
-      hasExcessSeats;
+      totalAllocated <= 0;
 
     if (isInvalid) {
+      let message = 'Invalid gate selection. Please adjust your gate before confirming.';
+      if (selectedGatesList.length === 0) {
+        message = 'Please select a gate (Keys 1-4 or Mouse Fwd/Back) to assign this group.';
+      } else if (totalAllocated === 0) {
+        message = `Gate ${selectedGatesList[0] + 1} is full (4/4)! Switch gates with Keys 1-4 or Mouse Fwd/Back.`;
+      } else if (totalAllocated < group.size) {
+        message = `Gate ${selectedGatesList[0] + 1} only has ${totalAllocated} available seat${totalAllocated === 1 ? '' : 's'} for this group of ${group.size}. Switch to an empty gate!`;
+      }
       triggerGroupingError(
         'INVALID SELECTION',
-        'Invalid gate selection. Please adjust your gates before confirming.',
+        message,
         'invalid'
       );
       // Explicitly preserve current selection upon failed confirm
@@ -716,6 +762,7 @@ export default function App() {
     dismissGroupingError();
 
     // 1. Build assignments list in ascending gate order
+    const currentGates = gatesRef.current;
     const updatedGates = currentGates.map((g) => ({ ...g, occupants: [...g.occupants] }));
     const assignments: { gateIndex: number; seatSlot: number; npc: NPCData }[] = [];
     const remainingMembers = [...group.members];
@@ -802,9 +849,13 @@ export default function App() {
   const handleTriggerDispatch = () => {
     soundEngine.init();
     const currentGates = gatesRef.current;
-    const totalFilled = currentGates.reduce((acc, g) => acc + g.occupants.length, 0);
+    // Up to 2 front passengers per gate board the 16-seat train
+    const totalDispatchedRiders = currentGates.reduce(
+      (acc, g) => acc + Math.min(2, g.occupants.length),
+      0
+    );
 
-    if (totalFilled === 0 || gameStateRef.current === 'DISPATCH_STATE' || gameStateRef.current === 'RESET_STATE') {
+    if (totalDispatchedRiders === 0 || gameStateRef.current === 'DISPATCH_STATE' || gameStateRef.current === 'RESET_STATE') {
       return;
     }
 
@@ -814,8 +865,8 @@ export default function App() {
     }
 
     // Calculate Efficiency & Refill Patience
-    const efficiencyRatio = totalFilled / 16;
-    const isPerfect = totalFilled === 16;
+    const efficiencyRatio = totalDispatchedRiders / 16;
+    const isPerfect = totalDispatchedRiders === 16;
     const patienceReward = difficulty.maxReward * efficiencyRatio;
     const nextPatience = Math.min(100, patienceRef.current + patienceReward);
     if (!settings.zenMode) {
@@ -823,7 +874,7 @@ export default function App() {
     }
 
     // Score calculations
-    const baseScore = totalFilled * 100;
+    const baseScore = totalDispatchedRiders * 100;
     const streakBonus = isPerfect ? (stats.currentStreak + 1) * 350 : 0;
     const perfectBonus = isPerfect ? 1000 : 0;
     const addedScore = baseScore + streakBonus + perfectBonus;
@@ -831,8 +882,8 @@ export default function App() {
     const newStreak = isPerfect ? stats.currentStreak + 1 : 0;
     const bestStreak = Math.max(stats.bestStreak, newStreak);
     const newDispatched = stats.trainsDispatched + 1;
-    const newGuests = stats.guestsProcessed + totalFilled;
-    const newSeatsFilled = stats.totalSeatsFilled + totalFilled;
+    const newGuests = stats.guestsProcessed + totalDispatchedRiders;
+    const newSeatsFilled = stats.totalSeatsFilled + totalDispatchedRiders;
     const newSeatsAvailable = stats.totalSeatsAvailable + 16;
     const avgEfficiency = Math.round((newSeatsFilled / newSeatsAvailable) * 100);
 
@@ -883,21 +934,26 @@ export default function App() {
         if (sceneRef.current) {
           sceneRef.current.setGameState('RESET_STATE');
           sceneRef.current.triggerResetAnimation(() => {
-            // Empty all gates
-            const emptyGates: GateState[] = Array.from({ length: GATE_COUNT }, (_, i) => ({
-              index: i,
-              occupants: [],
-              capacity: 2,
-              status: 'empty',
-              vehicleIndex: Math.floor(i / 2),
-            }));
-            setGates(emptyGates);
+            // Front 2 guests boarded; the queued guests automatically move up to the front
+            const updatedGates: GateState[] = gatesRef.current.map((g) => {
+              const remainingOccupants = g.occupants.slice(2);
+              return {
+                ...g,
+                occupants: remainingOccupants,
+                capacity: 4,
+                status: remainingOccupants.length === 0 ? 'empty' : remainingOccupants.length >= 2 ? 'full' : 'partial',
+              };
+            });
+            setGates(updatedGates);
+            gatesRef.current = updatedGates;
             if (sceneRef.current) {
-              sceneRef.current.updateGates(emptyGates);
+              sceneRef.current.updateGates(updatedGates);
             }
-            setGameState('LOAD_STATE');
+            const hasOccupants = updatedGates.some((g) => g.occupants.length > 0);
+            const nextState: GameState = hasOccupants ? 'READY_STATE' : 'LOAD_STATE';
+            setGameState(nextState);
             if (sceneRef.current) {
-              sceneRef.current.setGameState('LOAD_STATE');
+              sceneRef.current.setGameState(nextState);
             }
           });
         }
@@ -914,7 +970,7 @@ export default function App() {
     const emptyGates: GateState[] = Array.from({ length: GATE_COUNT }, (_, i) => ({
       index: i,
       occupants: [],
-      capacity: 2,
+      capacity: 4,
       status: 'empty',
       vehicleIndex: Math.floor(i / 2),
     }));
@@ -1041,8 +1097,6 @@ export default function App() {
         soundEnabled={settings.soundEnabled}
         isZenMode={settings.zenMode}
         keybinds={settings.keybinds}
-        activeKartBank={activeKartBank}
-        onSwitchKartBank={handleSwitchKartBank}
         groupingError={groupingError}
         onDismissError={dismissGroupingError}
         onToggleSound={handleToggleSound}

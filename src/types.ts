@@ -35,8 +35,8 @@ export interface GroupData {
 
 export interface GateState {
   index: number; // 0-7 (corresponds to Gates 1-8)
-  occupants: NPCData[];
-  capacity: number; // always 2
+  occupants: NPCData[]; // up to 4 (2 in front row for current train, 2 in queue behind)
+  capacity: number; // max queue size is 4
   status: 'empty' | 'partial' | 'full';
   vehicleIndex: number; // 0-3
 }

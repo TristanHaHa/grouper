@@ -7,6 +7,7 @@ import { DifficultyConfig } from '../types';
 export const GATE_COUNT = 8;
 export const VEHICLE_COUNT = 4;
 export const SEATS_PER_GATE = 2;
+export const GATE_QUEUE_CAPACITY = 4;
 export const TOTAL_SEATS = 16;
 
 // Spatial Coordinates (3D Three.js Units)

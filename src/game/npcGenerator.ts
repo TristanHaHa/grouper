@@ -16,14 +16,13 @@ const HATS: NPCData['hatType'][] = ['none', 'cap', 'beanie', 'headphones', 'ears
 
 let idCounter = 1000;
 
-// Weighted distribution for main queue group sizes.
-// Supports custom randomness parameter (0.0 = traditional 2s & 4s, 1.0 = equal uniform 1-8).
-// Default is 0.85 for exciting high variety & randomness!
+// Weighted distribution for main queue group sizes (1-4 riders, matching single gate capacity of 4).
+// Supports custom randomness parameter (0.0 = traditional 2s & 4s, 1.0 = equal uniform 1-4).
+// Default is 0.85 for exciting variety!
 export function getRandomGroupSize(randomness: number = 0.85): number {
-  // Base weights for sizes 1 to 8:
-  // Traditional coaster queues feature many 2s and 4s, but real guests come in 1s, 3s, 5s, 6s, 7s, 8s
-  const baseWeights = [12, 28, 16, 22, 9, 6, 4, 3]; // Sizes 1, 2, 3, 4, 5, 6, 7, 8
-  const uniformWeight = 100 / 8; // 12.5% each
+  // Base weights for sizes 1 to 4 (fits in 1 gate: 2 front row + 2 queue row):
+  const baseWeights = [15, 45, 15, 25]; // Sizes 1, 2, 3, 4
+  const uniformWeight = 100 / 4; // 25% each
   const clampedR = Math.max(0, Math.min(1, randomness));
 
   const blendedWeights = baseWeights.map((w) => w * (1 - clampedR) + uniformWeight * clampedR);
@@ -36,7 +35,7 @@ export function getRandomGroupSize(randomness: number = 0.85): number {
     }
     rand -= blendedWeights[i];
   }
-  return Math.floor(Math.random() * 8) + 1;
+  return Math.floor(Math.random() * 4) + 1;
 }
 
 export function generateGroup(type: QueueType, forcedSize?: number, randomness: number = 0.85): GroupData {
