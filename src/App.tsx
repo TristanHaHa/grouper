@@ -94,6 +94,15 @@ export default function App() {
   });
 
   const lastConfirmTimeRef = useRef<number>(0);
+  const lastCycleTimeRef = useRef<number>(0);
+  const lastClickToggleTimeRef = useRef<number>(0);
+  const [hoveredGateIndex, setHoveredGateIndex] = useState<number | null>(null);
+  const hoveredGateIndexRef = useRef<number | null>(null);
+  hoveredGateIndexRef.current = hoveredGateIndex;
+  // Aliases for compatibility
+  const focusedGateIndex = hoveredGateIndex;
+  const setFocusedGateIndex = setHoveredGateIndex;
+  const focusedGateIndexRef = hoveredGateIndexRef;
 
   // Grouping validation error notification state
   const [groupingError, setGroupingError] = useState<{
@@ -225,6 +234,12 @@ export default function App() {
       onCycleGate: (direction) => {
         handleCycleGate(direction);
       },
+      onToggleGateSelection: (gateIndex) => {
+        handleToggleGateSelection(gateIndex);
+      },
+      onGateHover: (gateIndex) => {
+        handleHoverGate(gateIndex, false);
+      },
     });
 
     sceneRef.current = scene;
@@ -324,7 +339,9 @@ export default function App() {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        handleAssignToGate(keyInt - 1);
+        if (selectedGroupRef.current) {
+          handleHoverGate(keyInt - 1, true);
+        }
         return;
       }
 
@@ -334,8 +351,10 @@ export default function App() {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        const gateIdx = parseInt(digitMatch[1], 10) - 1;
-        handleAssignToGate(gateIdx);
+        if (selectedGroupRef.current) {
+          const gateIdx = parseInt(digitMatch[1], 10) - 1;
+          handleHoverGate(gateIdx, true);
+        }
         return;
       }
 
@@ -345,6 +364,15 @@ export default function App() {
         e.stopPropagation();
         e.stopImmediatePropagation();
         handleDeselect();
+        return;
+      }
+
+      // Interact with E (Queues and Dispatch console)
+      if (e.code === 'KeyE' || e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        sceneRef.current?.handleInteraction();
         return;
       }
 
@@ -397,21 +425,12 @@ export default function App() {
     };
 
     const handleGlobalMouseDown = (e: MouseEvent) => {
-      // Mouse Forward (button 4): cycle to next gate
-      if (e.button === 4) {
+      // Mouse Forward/Back buttons (3 and 4) are handled exclusively in handleGlobalPointerDown
+      // to avoid double-cycling when browsers fire both pointerdown and mousedown.
+      if (e.button === 3 || e.button === 4) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        handleCycleGate(1);
-        return;
-      }
-
-      // Mouse Back (button 3): cycle to previous gate
-      if (e.button === 3) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        handleCycleGate(-1);
         return;
       }
 
@@ -512,10 +531,138 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  // --- Hover Gate (Intermediate Pre-Selection Stage) ---
+  // Default hover state; gate is NOT selected until left clicked!
+  // Hovering is ONLY allowed when a queue is selected!
+  const handleHoverGate = (gateIndex: number | null, playAudio: boolean = false) => {
+    // Guard: Do not allow hovering until a queue is selected!
+    if (!selectedGroupRef.current || gateIndex === null) {
+      setHoveredGateIndex(null);
+      hoveredGateIndexRef.current = null;
+      if (sceneRef.current) {
+        sceneRef.current.setHoveredGate(null);
+      }
+      return;
+    }
+
+    soundEngine.init();
+    const normalized = (gateIndex + 8) % 8;
+    setHoveredGateIndex(normalized);
+    hoveredGateIndexRef.current = normalized;
+
+    // Automatically sync active kart bank so the UI and 3D scene focus on the kart with the hovered gate
+    const targetKartBank: 0 | 1 = normalized < 4 ? 0 : 1;
+    if (activeKartBankRef.current !== targetKartBank) {
+      activeKartBankRef.current = targetKartBank;
+      setActiveKartBank(targetKartBank);
+      if (sceneRef.current) {
+        sceneRef.current.setActiveKartBank(targetKartBank);
+      }
+    }
+
+    if (playAudio) {
+      soundEngine.playGateHover(normalized + 1);
+    }
+
+    if (sceneRef.current) {
+      sceneRef.current.setHoveredGate(normalized);
+    }
+  };
+
+  // --- Toggle Gate Selection (Left Click) ---
+  // Left click is EXCLUSIVELY reserved for selecting/deselecting the gate!
+  const handleToggleGateSelection = (targetGateIndex?: number) => {
+    soundEngine.init();
+    const now = Date.now();
+    if (now - lastClickToggleTimeRef.current < 150) {
+      return;
+    }
+    lastClickToggleTimeRef.current = now;
+
+    // Do NOT allow selecting gates unless a queue is selected!
+    const group = selectedGroupRef.current;
+    if (!group) {
+      return;
+    }
+
+    const targetIdx = targetGateIndex !== undefined ? targetGateIndex : hoveredGateIndexRef.current;
+    if (targetIdx === null || targetIdx === undefined) {
+      return;
+    }
+
+    handleHoverGate(targetIdx, false);
+
+    const curSelected = selectedGateIndicesRef.current;
+    let newSelected: number[];
+
+    if (curSelected.includes(targetIdx)) {
+      // Toggle off / deselect THIS gate only
+      newSelected = curSelected.filter((idx) => idx !== targetIdx);
+      soundEngine.playGateDeselect();
+    } else {
+      // Add this gate to selected gates! It stays selected alongside other selected gates!
+      newSelected = [...curSelected, targetIdx];
+      soundEngine.playGateToggle(targetIdx + 1);
+    }
+
+    // Calculate allocation across all currently selected gates in order of selection
+    // Pass 1: Fill boarding row capacity (seats 1-2) across all selected gates
+    // Pass 2: If remaining members exist, allocate into queue staging rows behind (seats 3-4)
+    const newPending: { [gateIndex: number]: number } = {};
+    if (newSelected.length > 0) {
+      const currentGates = gatesRef.current;
+      let remainingToPlace = group.size;
+
+      // Pass 1: Boarding seats (up to 2 per gate)
+      for (const sIdx of newSelected) {
+        if (remainingToPlace <= 0) {
+          newPending[sIdx] = 0;
+          continue;
+        }
+        const occ = currentGates[sIdx]?.occupants?.length || 0;
+        const boardingCapacity = Math.max(0, 2 - occ);
+        const toBoard = Math.min(boardingCapacity, remainingToPlace);
+        newPending[sIdx] = toBoard;
+        remainingToPlace -= toBoard;
+      }
+
+      // Pass 2: Queue staging seats (up to 4 total per gate)
+      if (remainingToPlace > 0) {
+        for (const sIdx of newSelected) {
+          if (remainingToPlace <= 0) break;
+          const occ = currentGates[sIdx]?.occupants?.length || 0;
+          const currentAlloc = newPending[sIdx] || 0;
+          const queueCapacity = Math.max(0, 4 - (occ + currentAlloc));
+          const toQueue = Math.min(queueCapacity, remainingToPlace);
+          newPending[sIdx] = currentAlloc + toQueue;
+          remainingToPlace -= toQueue;
+        }
+      }
+    }
+
+    setSelectedGateIndices(newSelected);
+    selectedGateIndicesRef.current = newSelected;
+    setPendingAllocations(newPending);
+    pendingAllocationsRef.current = newPending;
+    if (sceneRef.current) {
+      sceneRef.current.setPendingGateAllocations(newPending, newSelected);
+    }
+  };
+
+  // --- Assign to Single Gate (Direct/Forced Selection or HUD click) ---
+  const handleAssignToGate = (
+    gateIndex: number,
+    _forceSelect: boolean = false,
+    _overrideGroup?: GroupData | null,
+    _playAudio: boolean = true
+  ) => {
+    handleToggleGateSelection(gateIndex);
+  };
+
   // --- Call Next Main Queue Group (Initiate Grouping Stage) ---
   const handleSelectMainQueue = () => {
     soundEngine.init();
-    if (selectedGroupRef.current && selectedGateIndicesRef.current.length > 0) {
+    if (selectedGroupRef.current && selectedGroupRef.current.type === 'main') {
       return;
     }
     let curQueue = [...mainQueueRef.current];
@@ -529,21 +676,25 @@ export default function App() {
     const frontGroup = curQueue[0];
     setSelectedGroup(frontGroup);
     selectedGroupRef.current = frontGroup;
+    soundEngine.playSelectGroup(frontGroup.size);
+    // Clear any prior selection so the new group starts cleanly in hover pre-selection stage
     setSelectedGateIndices([]);
     selectedGateIndicesRef.current = [];
     setPendingAllocations({});
     pendingAllocationsRef.current = {};
-    soundEngine.playSelectGroup(frontGroup.size);
     if (sceneRef.current) {
       sceneRef.current.setSelectedGroup(frontGroup);
-      sceneRef.current.setPendingGateAllocations({});
+      sceneRef.current.setPendingGateAllocations({}, []);
     }
+    // Highlight the first gate (Gate 1, index 0) in the pre-selection stage!
+    // It is NOT selected until left clicked.
+    handleHoverGate(0, true);
   };
 
   // --- Call Solo Single Rider (Initiate Grouping Stage) ---
   const handleSelectSingleQueue = () => {
     soundEngine.init();
-    if (selectedGroupRef.current && selectedGateIndicesRef.current.length > 0) {
+    if (selectedGroupRef.current && selectedGroupRef.current.type === 'single') {
       return;
     }
     let curQueue = [...singleQueueRef.current];
@@ -556,20 +707,24 @@ export default function App() {
     const frontSolo = curQueue[0];
     setSelectedGroup(frontSolo);
     selectedGroupRef.current = frontSolo;
+    soundEngine.playSelectGroup(1);
+    // Clear any prior selection so the new solo rider starts cleanly in hover pre-selection stage
     setSelectedGateIndices([]);
     selectedGateIndicesRef.current = [];
     setPendingAllocations({});
     pendingAllocationsRef.current = {};
-    soundEngine.playSelectGroup(1);
     if (sceneRef.current) {
       sceneRef.current.setSelectedGroup(frontSolo);
-      sceneRef.current.setPendingGateAllocations({});
+      sceneRef.current.setPendingGateAllocations({}, []);
     }
+    // Highlight the first gate (Gate 1, index 0) in the pre-selection stage!
+    // It is NOT selected until left clicked.
+    handleHoverGate(0, true);
   };
 
   // --- Deselect / Cancel Grouping Stage ---
   const handleDeselect = () => {
-    if (selectedGroupRef.current) {
+    if (selectedGroupRef.current || selectedGateIndicesRef.current.length > 0) {
       soundEngine.playDeselect();
       setSelectedGroup(null);
       selectedGroupRef.current = null;
@@ -577,143 +732,37 @@ export default function App() {
       selectedGateIndicesRef.current = [];
       setPendingAllocations({});
       pendingAllocationsRef.current = {};
+      setHoveredGateIndex(null);
+      hoveredGateIndexRef.current = null;
       if (sceneRef.current) {
         sceneRef.current.setSelectedGroup(null);
-        sceneRef.current.setPendingGateAllocations({});
+        sceneRef.current.setPendingGateAllocations({}, []);
+        sceneRef.current.setHoveredGate(null);
       }
     }
   };
 
   // --- Cycle Through Gates (Mouse Forward / Back) ---
+  // Cycles the hovered gate by 1 gate only (+1 or -1 with wrapping)
+  // Does NOT select until left click is pressed!
   const handleCycleGate = (direction: 1 | -1) => {
     soundEngine.init();
-    let group = selectedGroupRef.current;
-
-    // If no group is active, automatically start grouping stage with the front group
-    if (!group) {
-      const curMain = mainQueueRef.current;
-      if (curMain.length > 0) {
-        group = curMain[0];
-        setSelectedGroup(group);
-        selectedGroupRef.current = group;
-        if (sceneRef.current) {
-          sceneRef.current.setSelectedGroup(group);
-        }
-      } else {
-        const curSingle = singleQueueRef.current;
-        if (curSingle.length > 0) {
-          group = curSingle[0];
-          setSelectedGroup(group);
-          selectedGroupRef.current = group;
-          if (sceneRef.current) {
-            sceneRef.current.setSelectedGroup(group);
-          }
-        }
-      }
+    if (!selectedGroupRef.current) {
+      return;
     }
-
-    const curSelected = selectedGateIndicesRef.current;
-    let nextGateIndex: number;
-
-    if (curSelected.length === 0) {
-      // If nothing selected yet, Mouse Forward selects Gate 1 (0), Back selects Gate 8 (7)
-      nextGateIndex = direction === 1 ? 0 : 7;
-    } else {
-      const currentGate = curSelected[0];
-      // Move 1 gate forward or 1 gate back with wrapping (0-7)
-      nextGateIndex = (currentGate + direction + 8) % 8;
+    const now = Date.now();
+    // Cooldown prevents double-cycling from synthetic or rapid browser events (pointerdown + mousedown + BrowserForward)
+    if (now - lastCycleTimeRef.current < 150) {
+      return;
     }
+    lastCycleTimeRef.current = now;
 
-    handleAssignToGate(nextGateIndex, true);
-  };
+    // Move exactly 1 gate forward (+1) or 1 gate back (-1) with wrapping (0-7)
+    const currentHover = hoveredGateIndexRef.current ?? 0;
+    const nextGateIndex = (currentHover + direction + 8) % 8;
 
-  // --- Assign to Single Gate (Keys 1-8, Mouse Click, or Mouse Forward/Back) ---
-  // Exactly 1 gate can be selected at once!
-  const handleAssignToGate = (gateIndex: number, forceSelect: boolean = false) => {
-    soundEngine.init();
-    let group = selectedGroupRef.current;
-
-    // If no group is active, automatically start grouping stage with the front group
-    if (!group) {
-      const curMain = mainQueueRef.current;
-      if (curMain.length > 0) {
-        group = curMain[0];
-        setSelectedGroup(group);
-        selectedGroupRef.current = group;
-        if (sceneRef.current) {
-          sceneRef.current.setSelectedGroup(group);
-        }
-      } else {
-        const curSingle = singleQueueRef.current;
-        if (curSingle.length > 0) {
-          group = curSingle[0];
-          setSelectedGroup(group);
-          selectedGroupRef.current = group;
-          if (sceneRef.current) {
-            sceneRef.current.setSelectedGroup(group);
-          }
-        }
-      }
-    }
-
-    const curSelected = selectedGateIndicesRef.current;
-    let newSelected: number[];
-
-    if (!forceSelect && curSelected.length === 1 && curSelected[0] === gateIndex) {
-      // Toggle off / deselect if pressing the already-selected gate
-      newSelected = [];
-      soundEngine.playGateDeselect();
-    } else {
-      // Select ONLY this single gate (ensures only 1 is selected at once)
-      newSelected = [gateIndex];
-      soundEngine.playGateToggle(gateIndex + 1);
-
-      // Automatically sync active kart bank so the UI and 3D scene focus on the kart with the selected gate
-      const targetKartBank: 0 | 1 = gateIndex < 4 ? 0 : 1;
-      if (activeKartBankRef.current !== targetKartBank) {
-        activeKartBankRef.current = targetKartBank;
-        setActiveKartBank(targetKartBank);
-        if (sceneRef.current) {
-          sceneRef.current.setActiveKartBank(targetKartBank);
-        }
-      }
-    }
-
-    setSelectedGateIndices(newSelected);
-    selectedGateIndicesRef.current = newSelected;
-
-    // Calculate allocation for this single selected gate (front row 2 seats, then queue row 2 seats)
-    const currentGates = gatesRef.current;
-    const newPending: { [gateIndex: number]: number } = {};
-
-    if (newSelected.length === 1 && group) {
-      const gIdx = newSelected[0];
-      const occ = currentGates[gIdx]?.occupants?.length || 0;
-      let remainingToPlace = group.size;
-      let allocated = 0;
-
-      // Pass 1: Fill front boarding row (seats 1-2)
-      const boardingCapacity = Math.max(0, 2 - occ);
-      const toBoard = Math.min(boardingCapacity, remainingToPlace);
-      allocated += toBoard;
-      remainingToPlace -= toBoard;
-
-      // Pass 2: Fill queue staging row behind (seats 3-4, max 4 total per gate)
-      if (remainingToPlace > 0) {
-        const queueCapacity = Math.max(0, 4 - (occ + allocated));
-        const toQueue = Math.min(queueCapacity, remainingToPlace);
-        allocated += toQueue;
-        remainingToPlace -= toQueue;
-      }
-
-      newPending[gIdx] = allocated;
-    }
-
-    setPendingAllocations(newPending);
-    pendingAllocationsRef.current = newPending;
-    if (sceneRef.current) {
-      sceneRef.current.setPendingGateAllocations(newPending, newSelected);
-    }
+    // Intermediate pre-selection stage: hover only, do NOT select!
+    handleHoverGate(nextGateIndex, true);
   };
 
   // --- Confirm Grouping Stage (Pressed Enter or clicked Confirm) ---
@@ -829,9 +878,12 @@ export default function App() {
     selectedGateIndicesRef.current = [];
     setPendingAllocations({});
     pendingAllocationsRef.current = {};
+    setHoveredGateIndex(null);
+    hoveredGateIndexRef.current = null;
     if (sceneRef.current) {
       sceneRef.current.setSelectedGroup(null);
       sceneRef.current.setPendingGateAllocations({});
+      sceneRef.current.setHoveredGate(null);
     }
 
     // 5. Transition state to READY_STATE if at least 1 occupant is present
@@ -1088,6 +1140,7 @@ export default function App() {
         gameState={gameState}
         patience={patience}
         selectedGroup={selectedGroup}
+        hoveredGateIndex={hoveredGateIndex}
         selectedGateIndices={selectedGateIndices}
         pendingAllocations={pendingAllocations}
         gates={gates}

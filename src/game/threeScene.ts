@@ -41,6 +41,8 @@ export interface SceneCallbacks {
   onTogglePause?: () => void;
   onSwitchKartBank?: (bank: 0 | 1) => void;
   onCycleGate?: (direction: 1 | -1) => void;
+  onToggleGateSelection?: (gateIndex?: number) => void;
+  onGateHover?: (gateIndex: number | null) => void;
 }
 
 export interface TrainInstance {
@@ -117,8 +119,10 @@ export class RideStation3D {
 
   // Gate Hover Ghost Highlights & Grouping Stage Visual Indicators
   private gateGhostHighlights: THREE.Mesh[] = [];
+  private gateFloorLines: THREE.Mesh[] = [];
   private pendingGateAllocations: { [gateIndex: number]: number } = {};
   private selectedGateIndices: number[] = [];
+  private hoveredGateIndex: number | null = null;
   private lastMainQueue: GroupData[] = [];
   private lastSingleQueue: GroupData[] = [];
 
@@ -688,6 +692,7 @@ export class RideStation3D {
   private buildGates() {
     this.gateIndicators = [];
     this.gateGhostHighlights = [];
+    this.gateFloorLines = [];
 
     const padGeo = new THREE.PlaneGeometry(0.8, 1.15);
     const queuePadGeo = new THREE.PlaneGeometry(0.65, 1.15);
@@ -748,6 +753,20 @@ export class RideStation3D {
       ghostMesh.position.set(0.325, 0.055, 0);
       gateGroup.add(ghostMesh);
       this.gateGhostHighlights.push(ghostMesh);
+
+      // Luminous line directly under the gate threshold on the floor
+      const lineGeo = new THREE.PlaneGeometry(0.12, 1.28);
+      const lineMat = new THREE.MeshBasicMaterial({
+        color: '#f59e0b',
+        transparent: true,
+        opacity: 0.0,
+        side: THREE.DoubleSide,
+      });
+      const lineMesh = new THREE.Mesh(lineGeo, lineMat);
+      lineMesh.rotation.x = -Math.PI / 2;
+      lineMesh.position.set(-0.55, 0.058, 0);
+      gateGroup.add(lineMesh);
+      this.gateFloorLines.push(lineMesh);
 
       // Yellow Pneumatic Gate Barrier Rails (swing open on dispatch)
       const barrierGroup = new THREE.Group();
@@ -1410,6 +1429,16 @@ export class RideStation3D {
     });
   }
 
+  // --- Update Hovered Gate (Pre-selection Stage) ---
+  public setHoveredGate(gateIndex: number | null) {
+    if (!this.selectedGroup || gateIndex === null) {
+      this.hoveredGateIndex = null;
+    } else {
+      this.hoveredGateIndex = gateIndex;
+    }
+    this.updateGateHighlights();
+  }
+
   // --- Update Pending Gate Allocations for Grouping Stage ---
   public setPendingGateAllocations(allocations: { [gateIndex: number]: number }, selectedIndices?: number[]) {
     this.pendingGateAllocations = { ...allocations };
@@ -1421,14 +1450,32 @@ export class RideStation3D {
     this.updateGateHighlights();
   }
 
-  private updateGateHighlights() {
+  public updateGateHighlights() {
     this.gateGhostHighlights.forEach((g, idx) => {
       const isSelected = this.selectedGateIndices.includes(idx);
+      const isHovered = this.hoveredGateIndex === idx;
+
       if (isSelected) {
+        // Confirmed Selected Gate: Vibrant Sky Blue
         (g.material as THREE.MeshBasicMaterial).color.set('#38bdf8');
-        (g.material as THREE.MeshBasicMaterial).opacity = 0.65;
+        (g.material as THREE.MeshBasicMaterial).opacity = 0.72;
+      } else if (isHovered) {
+        // Intermediate Pre-Selection Stage: Warm Amber Glow
+        (g.material as THREE.MeshBasicMaterial).color.set('#f59e0b');
+        (g.material as THREE.MeshBasicMaterial).opacity = 0.48;
       } else {
         (g.material as THREE.MeshBasicMaterial).opacity = 0;
+      }
+
+      // Under-gate floor line - ONLY appears if currently hovered (even if selected)
+      const floorLine = this.gateFloorLines[idx];
+      if (floorLine) {
+        if (isHovered) {
+          (floorLine.material as THREE.MeshBasicMaterial).color.set('#f59e0b');
+          (floorLine.material as THREE.MeshBasicMaterial).opacity = 0.95;
+        } else {
+          (floorLine.material as THREE.MeshBasicMaterial).opacity = 0.0;
+        }
       }
     });
   }
@@ -1506,51 +1553,20 @@ export class RideStation3D {
 
   // --- Preview Group Hover Over Gates ---
   public updateGateHoverPreview(hoverGateIndex: number | null, group: GroupData | null) {
-    // If we have active pending allocations in the grouping stage, show those
-    const hasPending = Object.keys(this.pendingGateAllocations).length > 0;
-    if (hasPending) {
+    if (!group) {
+      if (this.hoveredGateIndex !== null) {
+        this.hoveredGateIndex = null;
+        this.callbacks.onGateHover?.(null);
+      }
       this.updateGateHighlights();
       return;
     }
 
-    // Reset all ghost highlights
-    this.gateGhostHighlights.forEach(g => {
-      (g.material as THREE.MeshBasicMaterial).opacity = 0;
-    });
-
-    if (hoverGateIndex === null || !group) return;
-
-    // Check how many seats this group would fill sequentially starting from hoverGateIndex
-    let remaining = group.size;
-    let valid = true;
-
-    // Check validity first
-    let tempRemaining = group.size;
-    for (let i = hoverGateIndex; i < GATE_COUNT; i++) {
-      const g = this.gatesState[i];
-      const occ = g ? g.occupants.length : 0;
-      const free = 4 - occ;
-      tempRemaining -= free;
-      if (tempRemaining <= 0) break;
+    if (hoverGateIndex !== null && this.hoveredGateIndex !== hoverGateIndex) {
+      this.hoveredGateIndex = hoverGateIndex;
+      this.callbacks.onGateHover?.(hoverGateIndex);
     }
-    if (tempRemaining > 0) valid = false;
-
-    // Apply glowing preview
-    for (let i = hoverGateIndex; i < GATE_COUNT; i++) {
-      const g = this.gatesState[i];
-      const occ = g ? g.occupants.length : 0;
-      const free = 4 - occ;
-      if (free <= 0 && remaining > 0) {
-        continue;
-      }
-      const ghost = this.gateGhostHighlights[i];
-      if (ghost) {
-        (ghost.material as THREE.MeshBasicMaterial).color.set(valid ? '#38bdf8' : '#ef4444');
-        (ghost.material as THREE.MeshBasicMaterial).opacity = 0.55;
-      }
-      remaining -= free;
-      if (remaining <= 0) break;
-    }
+    this.updateGateHighlights();
   }
 
   // --- Dispatch State Trigger ---
@@ -1747,6 +1763,10 @@ export class RideStation3D {
 
   public setSelectedGroup(group: GroupData | null) {
     this.selectedGroup = group;
+    if (!group) {
+      this.hoveredGateIndex = null;
+      this.updateGateHighlights();
+    }
   }
 
   public setPatience(patience: number) {
@@ -1814,11 +1834,16 @@ export class RideStation3D {
 
     const dom = this.container;
 
-    // Pointer Lock & Mouse Look (Left Click only)
-    dom.addEventListener('click', (e) => {
+    // Pointer Lock & Gate Selection (Left Click only)
+    // Left click is EXCLUSIVELY reserved for selecting/deselecting a gate
+    dom.addEventListener('pointerdown', (e) => {
       if (this.isPaused) return;
-      if (e.button !== 0) return;
-      this.handleInteractionClick(e);
+      if (e.button === 0) {
+        if (!this.isPointerLocked) {
+          this.requestPointerLock();
+        }
+        this.handleLeftClick(e);
+      }
     });
 
     // Right Click to confirm grouping stage and let the group go
@@ -1827,21 +1852,11 @@ export class RideStation3D {
       this.callbacks.onConfirmGrouping?.();
     });
 
-    // Mouse buttons: 2 = Right Click, 3 = Back (Gate -1), 4 = Forward (Gate +1)
+    // Mouse buttons: 2 = Right Click to confirm grouping
     dom.addEventListener('mousedown', (e) => {
       if (e.button === 2) {
         e.preventDefault();
         this.callbacks.onConfirmGrouping?.();
-      } else if (e.button === 4) {
-        // Forward button: cycle to next gate
-        e.preventDefault();
-        e.stopPropagation();
-        this.callbacks.onCycleGate?.(1);
-      } else if (e.button === 3) {
-        // Back button: cycle to previous gate
-        e.preventDefault();
-        e.stopPropagation();
-        this.callbacks.onCycleGate?.(-1);
       }
     });
 
@@ -1944,9 +1959,9 @@ export class RideStation3D {
       return;
     }
 
-    // Interact / Raycast Action (Dispatch button, gates, or queue stoplines)
+    // Interact Key (E): Interacts with queue lines or dispatch button
     if (e.code === (kb?.interact || 'KeyE') || e.code === 'KeyE' || e.code === 'KeyF') {
-      this.handleInteractionClick();
+      this.handleInteraction();
       return;
     }
 
@@ -1980,7 +1995,54 @@ export class RideStation3D {
     }
   }
 
-  private handleInteractionClick(e?: MouseEvent) {
+  private lastLeftClickTime = 0;
+
+  // Left click is EXCLUSIVELY reserved for selecting and deselecting a gate
+  public handleLeftClick(e?: MouseEvent | PointerEvent) {
+    const now = Date.now();
+    if (now - this.lastLeftClickTime < 150) {
+      return;
+    }
+    this.lastLeftClickTime = now;
+
+    // Do NOT allow selecting gates if no queue is selected!
+    if (!this.selectedGroup) {
+      return;
+    }
+
+    // 1. If pointer is not locked and cursor click event is available, raycast directly under cursor
+    if (e && !this.isPointerLocked) {
+      const rect = this.container.getBoundingClientRect();
+      const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      const clickRaycaster = new THREE.Raycaster();
+      clickRaycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), this.camera);
+      const hits = clickRaycaster.intersectObjects(this.interactables, false);
+      for (const hit of hits) {
+        if (hit.object.name.startsWith('gate_')) {
+          const gIdx = parseInt(hit.object.name.replace('gate_', ''), 10);
+          this.callbacks.onToggleGateSelection?.(gIdx);
+          return;
+        }
+      }
+    }
+
+    // 2. If in pointer-locked mode and crosshair is pointing at a gate
+    if (this.isPointerLocked && this.currentHoverTarget.type === 'gate' && this.currentHoverTarget.index !== undefined) {
+      this.callbacks.onToggleGateSelection?.(this.currentHoverTarget.index);
+      return;
+    }
+
+    // 3. Fallback: If a gate is currently hovered (via keyboard 1-8, cycling forward/back, or crosshair), toggle selection
+    // Once a gate is selected it stays selected alongside others until deselected or confirmed
+    if (this.hoveredGateIndex !== null) {
+      this.callbacks.onToggleGateSelection?.(this.hoveredGateIndex);
+      return;
+    }
+  }
+
+  // Interacting with queues and dispatch occurs ONLY via the 'E' key
+  public handleInteraction() {
     // 1. Direct crosshair target check
     if (this.currentHoverTarget.type === 'main_queue') {
       this.callbacks.onSelectMainQueue();
@@ -1995,33 +2057,7 @@ export class RideStation3D {
       return;
     }
 
-    // 2. If pointer is not locked and cursor click event is available, raycast under cursor
-    if (e && !this.isPointerLocked) {
-      const rect = this.container.getBoundingClientRect();
-      const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      const clickRaycaster = new THREE.Raycaster();
-      clickRaycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), this.camera);
-      const hits = clickRaycaster.intersectObjects(this.interactables, false);
-      if (hits.length > 0) {
-        const hitName = hits[0].object.name;
-        if (hitName === 'main_queue_stop') {
-          this.callbacks.onSelectMainQueue();
-          return;
-        }
-        if (hitName === 'single_queue_stop') {
-          this.callbacks.onSelectSingleQueue();
-          return;
-        }
-        if (hitName === 'dispatch_button') {
-          this.callbacks.onTriggerDispatch();
-          return;
-        }
-      }
-    }
-
-    // 3. Directional check: if user left-clicks while looking towards the queue entrance (dir.x > 0.05)
-    // Left-click selects the queue in that field of view
+    // 2. Directional check: if user presses E while looking towards the queue entrance (dir.x > 0.05)
     const dir = new THREE.Vector3();
     this.camera.getWorldDirection(dir);
     if (dir.x > 0.05) {
@@ -2035,7 +2071,12 @@ export class RideStation3D {
         return;
       }
     }
-    // GATES ARE NEVER SELECTED VIA CLICK OR INTERACT KEY!
+
+    // 3. Directional check: if user is facing dispatch console area
+    if (dir.x < -0.3) {
+      this.callbacks.onTriggerDispatch();
+      return;
+    }
   }
 
   // --- Raycast Target Evaluation ---
@@ -2054,36 +2095,40 @@ export class RideStation3D {
         newTarget = {
           type: 'main_queue',
           label: 'MAIN QUEUE STOP LINE',
-          description: this.selectedGroup ? 'Switch to Main Queue [Left Click]' : 'Call Main Queue [Left Click]',
+          description: this.selectedGroup ? 'Switch to Main Queue [E]' : 'Call Main Queue [E]',
           isValid: true,
         };
       } else if (hitName === 'single_queue_stop') {
         newTarget = {
           type: 'single_queue',
           label: 'SINGLE RIDER STOP LINE',
-          description: this.selectedGroup ? 'Switch to Single Rider [Left Click]' : 'Call Single Rider [Left Click]',
+          description: this.selectedGroup ? 'Switch to Single Rider [E]' : 'Call Single Rider [E]',
           isValid: true,
         };
       } else if (hitName.startsWith('gate_')) {
         const gateIdx = parseInt(hitName.replace('gate_', ''), 10);
-        hoverGate = gateIdx;
         const gate = this.gatesState[gateIdx];
         const occ = gate ? gate.occupants.length : 0;
+        const isSelected = this.selectedGateIndices.includes(gateIdx);
 
         if (this.selectedGroup) {
+          hoverGate = gateIdx;
           newTarget = {
             type: 'gate',
             index: gateIdx,
-            label: `GATE 0${gateIdx + 1} (${occ}/4)`,
-            description: `Assign to Gate ${gateIdx + 1}: Key [${gateIdx + 1}] • Forward/Back to Cycle Gate`,
+            label: `GATE 0${gateIdx + 1} (${occ}/4)${isSelected ? ' [SELECTED]' : ''}`,
+            description: isSelected
+              ? `Left Click to Deselect Gate • Right Click / Enter to Let Group Go`
+              : `Left Click to SELECT Gate • Forward/Back to Cycle Gate`,
             isValid: true,
           };
         } else {
+          hoverGate = null;
           newTarget = {
             type: 'gate',
             index: gateIdx,
             label: `GATE 0${gateIdx + 1} (${occ}/4)`,
-            description: `Call Main or Single queue first with Left Click`,
+            description: `Call a Queue First [E] to Assign Groups`,
             isValid: false,
           };
         }
@@ -2092,7 +2137,7 @@ export class RideStation3D {
         newTarget = {
           type: 'dispatch_button',
           label: 'DISPATCH CONSOLE',
-          description: canDispatch ? 'TRIGGER DISPATCH! [E / Click Button]' : 'Fill at least 1 seat before dispatching',
+          description: canDispatch ? 'TRIGGER DISPATCH! [E]' : 'Fill at least 1 seat before dispatching',
           isValid: canDispatch,
         };
       }
@@ -2123,6 +2168,35 @@ export class RideStation3D {
 
     const delta = Math.min(this.clock.getDelta(), 0.1);
     const time = this.clock.getElapsedTime();
+
+    // 0. Intermediate pre-selection stage: animate gentle pulse on hovered gate when not selected
+    if (this.hoveredGateIndex !== null) {
+      const isSelected = this.selectedGateIndices.includes(this.hoveredGateIndex);
+      if (!isSelected) {
+        const ghost = this.gateGhostHighlights[this.hoveredGateIndex];
+        if (ghost) {
+          const pulse = 0.38 + 0.18 * Math.sin(time * 5.5);
+          (ghost.material as THREE.MeshBasicMaterial).opacity = pulse;
+        }
+      }
+      // Underline indication ONLY appears and pulses on the currently hovered gate (whether selected or not)
+      const line = this.gateFloorLines[this.hoveredGateIndex];
+      if (line) {
+        const linePulse = 0.7 + 0.3 * Math.sin(time * 6.0);
+        (line.material as THREE.MeshBasicMaterial).color.set('#f59e0b');
+        (line.material as THREE.MeshBasicMaterial).opacity = linePulse;
+      }
+    }
+
+    // Keep selected gates consistently illuminated (sky blue ghost pads)
+    // Floor underline is NOT shown on selected gates unless that gate is also currently hovered!
+    this.selectedGateIndices.forEach((selIdx) => {
+      const ghost = this.gateGhostHighlights[selIdx];
+      if (ghost) {
+        (ghost.material as THREE.MeshBasicMaterial).color.set('#38bdf8');
+        (ghost.material as THREE.MeshBasicMaterial).opacity = 0.75;
+      }
+    });
 
     // 1. Move Player on Platform with Jump Gravity Physics
     const speed = (this.isSprinting ? 7.0 : 4.2) * delta;

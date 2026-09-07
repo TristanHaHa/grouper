@@ -428,6 +428,27 @@ class SoundEngine {
     osc.stop(now + 0.1);
   }
 
+  // Hover over a gate (intermediate pre-selection stage)
+  public playGateHover(gateNum?: number) {
+    if (this.muted || !this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    const freq = gateNum ? 420 + (gateNum % 8) * 30 : 540;
+    osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.9, now + 0.04);
+
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.04);
+  }
+
   // Group Confirmation & Send to Gates
   public playGroupConfirm() {
     if (this.muted || !this.ctx || !this.sfxGain) return;

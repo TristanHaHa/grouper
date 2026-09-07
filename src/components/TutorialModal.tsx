@@ -77,16 +77,24 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({ onClose }) => {
             </h4>
             <div className="grid grid-cols-2 gap-2 text-[11px]">
               <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
-                <span className="text-neutral-400">1 – 8 Keys:</span>
-                <span className="text-sky-300 font-bold">Select Gate (1–8)</span>
+                <span className="text-neutral-400">E Key:</span>
+                <span className="text-emerald-300 font-bold">Interact (Queue / Dispatch)</span>
+              </div>
+              <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
+                <span className="text-neutral-400">Left Click:</span>
+                <span className="text-sky-300 font-bold">Select / Deselect Gate</span>
               </div>
               <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
                 <span className="text-neutral-400">Mouse Fwd / Back:</span>
-                <span className="text-amber-300 font-bold">Cycle Gates 1–8 (Wrapping)</span>
+                <span className="text-amber-300 font-bold">Move Gate Selection</span>
               </div>
               <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
                 <span className="text-neutral-400">Right Click / Enter:</span>
                 <span className="text-emerald-300 font-bold">Let Group Go / Confirm</span>
+              </div>
+              <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
+                <span className="text-neutral-400">1 – 8 Keys:</span>
+                <span className="text-sky-300 font-bold">Direct Gate (1–8)</span>
               </div>
               <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
                 <span className="text-neutral-400">M / N:</span>
@@ -101,20 +109,12 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({ onClose }) => {
                 <span className="text-white font-bold">First-Person Look</span>
               </div>
               <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
-                <span className="text-neutral-400">Left Click:</span>
-                <span className="text-emerald-300 font-bold">Select Main / Single Queue</span>
-              </div>
-              <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
                 <span className="text-neutral-400">Space:</span>
-                <span className="text-white font-bold">Dispatch Train</span>
+                <span className="text-white font-bold">Jump</span>
               </div>
               <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
                 <span className="text-neutral-400">Esc / Q:</span>
                 <span className="text-white font-bold">Deselect</span>
-              </div>
-              <div className="flex justify-between bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
-                <span className="text-neutral-400">P:</span>
-                <span className="text-white font-bold">Pause & Settings</span>
               </div>
             </div>
           </div>
