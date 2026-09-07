@@ -21,7 +21,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ stats, onRestart }
       : 'text-neutral-300 border-neutral-700 bg-neutral-800/50';
 
   return (
-    <div className="fixed inset-0 z-50 bg-neutral-950/85 backdrop-blur-md flex items-center justify-center p-4 select-none">
+    <div data-controller-menu className="fixed inset-0 z-50 bg-neutral-950/85 backdrop-blur-md flex items-center justify-center p-4 select-none">
       <div className="bg-neutral-900 border border-neutral-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="text-center mb-6">
@@ -30,7 +30,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ stats, onRestart }
           </div>
           <h2 className="text-2xl font-black font-mono text-white tracking-wide">SHIFT CONCLUDED</h2>
           <p className="text-sm text-neutral-400 mt-1">
-            Guest patience depleted. Here is your station operations debrief.
+            Guest Satisfaction depleted. Here is your station operations debrief.
           </p>
         </div>
 

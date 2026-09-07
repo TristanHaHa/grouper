@@ -1,1 +1,12 @@
 @import "tailwindcss";
+
+@keyframes reward-pop {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.reward-pop { animation: reward-pop 240ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reward-pop { animation: none; }
+}

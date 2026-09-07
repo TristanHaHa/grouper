@@ -22,15 +22,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChangeDifficulty,
   onClose,
 }) => {
-  const currentRandomness = settings.groupRandomness ?? 0.75;
+  const currentRandomness = settings.groupRandomness ?? 0;
+  // The slider's 0–25% range represents the full 0–100% variety range.
+  const sliderRandomness = currentRandomness * 0.25;
   const randomnessLabel =
     currentRandomness <= 0.2
-      ? 'Standard Pairs & Quads'
+      ? 'Standard Party Mix'
       : currentRandomness <= 0.6
       ? 'Moderate Variety'
       : currentRandomness <= 0.85
       ? 'High Variety & Randomness'
-      : 'Pure Chaotic Variety (1–6)';
+      : 'Pure Chaotic Variety (1–16)';
 
   return (
     <div className="fixed inset-0 z-50 bg-neutral-950/80 backdrop-blur-md flex items-center justify-center p-4 select-none">
@@ -79,21 +81,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Dice5 className="w-3.5 h-3.5 text-amber-400" />
                 <span>GROUP SIZE RANDOMNESS</span>
               </div>
-              <span className="text-amber-400 font-extrabold">{Math.round(currentRandomness * 100)}%</span>
+              <span className="text-amber-400 font-extrabold">{Math.round(sliderRandomness * 100)}%</span>
             </div>
             <input
               type="range"
               min="0"
-              max="1"
-              step="0.05"
-              value={currentRandomness}
-              onChange={(e) => onUpdateSettings({ groupRandomness: parseFloat(e.target.value) })}
+              max="0.25"
+              step="0.0125"
+              value={sliderRandomness}
+              onChange={(e) => onUpdateSettings({ groupRandomness: parseFloat(e.target.value) / 0.25 })}
               className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-400"
             />
             <div className="flex justify-between items-center text-[10px] font-mono text-neutral-400 mt-1.5">
-              <span>Pairs/Quads</span>
+              <span>Standard Mix</span>
               <span className="text-amber-300/90 font-semibold">{randomnessLabel}</span>
-              <span>All 1–6 Even</span>
+              <span>All 1–16 Even</span>
             </div>
           </div>
 

@@ -90,6 +90,7 @@ export const PauseMenuModal: React.FC<PauseMenuModalProps> = ({
   return (
     <div
       id="pause-menu-backdrop"
+      data-controller-menu
       className="fixed inset-0 z-50 bg-neutral-950/85 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-150"
     >
       <div
@@ -121,6 +122,7 @@ export const PauseMenuModal: React.FC<PauseMenuModalProps> = ({
 
           <button
             id="pause-modal-close-btn"
+            data-controller-back
             onClick={onResume}
             className="w-9 h-9 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-neutral-700/50"
             title="Resume [ESC / P]"
@@ -211,10 +213,10 @@ export const PauseMenuModal: React.FC<PauseMenuModalProps> = ({
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <InfinityIcon className={`w-4 h-4 ${settings.zenMode ? 'text-emerald-400' : 'text-neutral-400'}`} />
-                      <span className="font-mono font-bold text-sm text-white">ZEN MODE (UNLIMITED PATIENCE)</span>
+                      <span className="font-mono font-bold text-sm text-white">ZEN MODE (UNLIMITED SATISFACTION)</span>
                     </div>
                     <p className="text-xs text-neutral-300 leading-relaxed">
-                      Removes guest patience decay completely. Enjoy stress-free, peaceful grouper operations and perfect
+                      Removes Guest Satisfaction decay completely. Enjoy stress-free, peaceful grouper operations and perfect
                       train dispatching at your own relaxed pace.
                     </p>
                   </div>
@@ -293,7 +295,7 @@ export const PauseMenuModal: React.FC<PauseMenuModalProps> = ({
                     <span>GROUP SIZE VARIETY & RANDOMNESS</span>
                   </div>
                   <span className="text-purple-400 font-mono text-sm">
-                    {Math.round((settings.groupRandomness ?? 0.85) * 100)}%
+                    {Math.round((settings.groupRandomness ?? 0) * 25)}%
                   </span>
                 </div>
                 <p className="text-[11px] text-neutral-400">
@@ -303,16 +305,16 @@ export const PauseMenuModal: React.FC<PauseMenuModalProps> = ({
                   id="group-randomness-slider"
                   type="range"
                   min="0.0"
-                  max="1.0"
-                  step="0.05"
-                  value={settings.groupRandomness ?? 0.85}
-                  onChange={(e) => onUpdateSettings({ groupRandomness: parseFloat(e.target.value) })}
+                  max="0.25"
+                  step="0.0125"
+                  value={(settings.groupRandomness ?? 0) * 0.25}
+                  onChange={(e) => onUpdateSettings({ groupRandomness: parseFloat(e.target.value) / 0.25 })}
                   className="w-full h-2.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-400"
                 />
                 <div className="flex justify-between text-[10px] font-mono text-neutral-400">
                   <span>Traditional (Pairs & Quads)</span>
-                  <span className="text-purple-300 font-bold">High Variety (85% Default)</span>
-                  <span>Max Random (100%)</span>
+                  <span className="text-purple-300 font-bold">Max Variety (25% Default)</span>
+                  <span>100% Variety</span>
                 </div>
               </div>
             </div>
@@ -731,6 +733,7 @@ export const PauseMenuModal: React.FC<PauseMenuModalProps> = ({
           {/* Primary Resume Button */}
           <button
             id="pause-modal-resume-btn"
+            data-controller-back
             onClick={onResume}
             className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-400 hover:to-teal-400 text-white font-mono font-bold text-xs shadow-lg shadow-sky-500/20 flex items-center gap-2 transition-all cursor-pointer"
           >

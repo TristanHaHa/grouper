@@ -61,7 +61,7 @@ export const DIFFICULTY_PRESETS: Record<string, DifficultyConfig> = {
   TRAINEE: {
     name: 'TRAINEE',
     initialPatience: 100,
-    passiveDrainRate: 2.2, // ~45s per full bar
+    passiveDrainRate: 0.6, // ~167s per full bar, after startup grace
     drainAcceleration: 0.08,
     maxReward: 48,
     emptySeatPenalty: 1.5,
@@ -70,7 +70,7 @@ export const DIFFICULTY_PRESETS: Record<string, DifficultyConfig> = {
   STANDARD: {
     name: 'STANDARD',
     initialPatience: 100,
-    passiveDrainRate: 3.5, // ~28s per full bar
+    passiveDrainRate: 1.0, // 100s per full bar, after startup grace
     drainAcceleration: 0.15,
     maxReward: 42,
     emptySeatPenalty: 2.5,
@@ -79,7 +79,7 @@ export const DIFFICULTY_PRESETS: Record<string, DifficultyConfig> = {
   RUSH_HOUR: {
     name: 'RUSH_HOUR',
     initialPatience: 90,
-    passiveDrainRate: 5.0, // ~18s per bar! Intense
+    passiveDrainRate: 1.6, // ~56s from 90 patience, after startup grace
     drainAcceleration: 0.25,
     maxReward: 38,
     emptySeatPenalty: 4.0,

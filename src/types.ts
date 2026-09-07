@@ -11,6 +11,8 @@ export type GroupStatus = 'Waiting' | 'Targeted' | 'Assigned' | 'Boarding' | 'Bo
 export interface NPCData {
   id: string;
   groupId: string;
+  sourceQueue: QueueType;
+  sourceGroupSize: number;
   name: string;
   color: string;
   hatType: 'none' | 'cap' | 'beanie' | 'headphones' | 'ears';
@@ -24,7 +26,7 @@ export interface NPCData {
 
 export interface GroupData {
   id: string;
-  size: number; // 1-6 for main, 1 for single
+  size: number; // 1-16 for main, 1 for single
   type: QueueType;
   color: string;
   members: NPCData[];
@@ -140,5 +142,5 @@ export interface GameSettings {
   fov: number; // default 75
   shadowsEnabled: boolean;
   keybinds: KeybindsConfig;
-  groupRandomness: number; // 0.0 to 1.0 (default 0.75 for high variety and randomness)
+  groupRandomness: number; // 0.0 to 1.0 (default 1.0 for maximum variety)
 }

@@ -1,6 +1,6 @@
 /**
  * NPC and Group Generator with weighted randomization.
- * Generates guest groups (sizes 1-6 with peak weights on 2s and 4s) and single riders.
+ * Generates guest groups (sizes 1-16, with the station's standard party-size weights) and single riders.
  */
 
 import { GroupData, NPCData, QueueType } from '../types';
@@ -16,13 +16,14 @@ const HATS: NPCData['hatType'][] = ['none', 'cap', 'beanie', 'headphones', 'ears
 
 let idCounter = 1000;
 
-// Weighted distribution for main queue group sizes (1-4 riders, matching single gate capacity of 4).
-// Supports custom randomness parameter (0.0 = traditional 2s & 4s, 1.0 = equal uniform 1-4).
-// Default is 0.85 for exciting variety!
-export function getRandomGroupSize(randomness: number = 0.85): number {
-  // Base weights for sizes 1 to 4 (fits in 1 gate: 2 front row + 2 queue row):
-  const baseWeights = [15, 45, 15, 25]; // Sizes 1, 2, 3, 4
-  const uniformWeight = 100 / 4; // 25% each
+// Weighted distribution for main queue group sizes (1-16 riders).
+// Supports custom randomness parameter (0.0 = standard distribution, 1.0 = equal uniform 1-16).
+// Default is 1.0 for maximum variety.
+export function getRandomGroupSize(randomness: number = 1): number {
+  // Standard distribution: 1–8 have explicit odds; the 9–12 and 13–16
+  // buckets are split evenly across each size in their respective range.
+  const baseWeights = [5, 28, 18, 24, 11, 6, 3, 2, 0.625, 0.625, 0.625, 0.625, 0.125, 0.125, 0.125, 0.125];
+  const uniformWeight = 100 / 16;
   const clampedR = Math.max(0, Math.min(1, randomness));
 
   const blendedWeights = baseWeights.map((w) => w * (1 - clampedR) + uniformWeight * clampedR);
@@ -35,12 +36,12 @@ export function getRandomGroupSize(randomness: number = 0.85): number {
     }
     rand -= blendedWeights[i];
   }
-  return Math.floor(Math.random() * 4) + 1;
+  return Math.floor(Math.random() * 16) + 1;
 }
 
-export function generateGroup(type: QueueType, forcedSize?: number, randomness: number = 0.85): GroupData {
+export function generateGroup(type: QueueType, forcedSize?: number, randomness: number = 1): GroupData {
   const groupId = `grp_${idCounter++}`;
-  const size = type === 'single' ? 1 : (forcedSize || getRandomGroupSize(randomness));
+  const size = type === 'single' ? 1 : Math.max(1, Math.min(16, forcedSize || getRandomGroupSize(randomness)));
   const color = type === 'single' ? '#06b6d4' : NPC_PALETTES[Math.floor(Math.random() * NPC_PALETTES.length)];
 
   const members: NPCData[] = [];
@@ -52,6 +53,8 @@ export function generateGroup(type: QueueType, forcedSize?: number, randomness: 
     members.push({
       id: npcId,
       groupId,
+      sourceQueue: type,
+      sourceGroupSize: size,
       name,
       color,
       hatType: hat,
@@ -76,7 +79,7 @@ export function generateGroup(type: QueueType, forcedSize?: number, randomness: 
   };
 }
 
-export function createInitialQueues(randomness: number = 0.85): { mainQueue: GroupData[]; singleQueue: GroupData[] } {
+export function createInitialQueues(randomness: number = 1): { mainQueue: GroupData[]; singleQueue: GroupData[] } {
   const mainQueue: GroupData[] = [];
   const singleQueue: GroupData[] = [];
 

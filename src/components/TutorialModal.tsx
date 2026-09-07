@@ -12,7 +12,7 @@ interface TutorialModalProps {
 
 export const TutorialModal: React.FC<TutorialModalProps> = ({ onClose }) => {
   return (
-    <div className="fixed inset-0 z-50 bg-neutral-950/85 backdrop-blur-md flex items-center justify-center p-4 select-none">
+    <div data-controller-menu className="fixed inset-0 z-50 bg-neutral-950/85 backdrop-blur-md flex items-center justify-center p-4 select-none">
       <div className="bg-neutral-900 border border-neutral-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl animate-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
           {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-neutral-800 mb-5">
@@ -21,6 +21,7 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({ onClose }) => {
             <h3 className="text-lg font-mono font-bold text-amber-400">MARIO KART • GROUPER MANUAL</h3>
           </div>
           <button
+            data-controller-back
             onClick={onClose}
             className="w-8 h-8 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white flex items-center justify-center transition-all cursor-pointer"
           >
@@ -64,6 +65,13 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({ onClose }) => {
               Attendant Strategy & Patience Rewards
             </h4>
             <ul className="text-xs text-neutral-400 space-y-1.5 list-disc list-inside">
+              <li><strong>Time to Prepare:</strong> Every shift starts with 15 seconds of grace. Standard difficulty drains 1 patience per second during loading; train animations and pausing freeze the drain.</li>
+              <li><strong>Grouping Rewards:</strong> Each confirmed rider restores +1 patience. Filling a gate to 4/4 adds +2 patience and gives its UI a double border.</li>
+              <li><strong>Plan Ahead:</strong> Each double-grouped gate earns +100 score on dispatch. Each staged rider advancing for the next train restores another +1 patience.</li>
+              <li><strong>Last Chance:</strong> At zero patience, you have 10 seconds to assign riders or dispatch and recover before guests leave.</li>
+              <li><strong>Serve Both Queues:</strong> Board one complete main group and two single riders on a train for +5 patience and +250 score. Staged riders count when they board the next train; unavailable queues are not required.</li>
+              <li><strong>Watch Your Guests:</strong> Smiles and relaxed swaying mean guests are happy. After 25 seconds without service, they tap their feet and ask about their turn; serving them earns +1 extra patience per rider. After 50 seconds they frown, wave for attention, and complain; serving them earns +2. Guests talking about leaving add 0.15 patience drain per second after 60 seconds, capped at 0.3 across queues. Served guests relax and say thanks. Grace, pauses, and train animations freeze queue pressure.</li>
+              <li><strong>Departure Sequence:</strong> Gates open, riders board, gates close, and restraints lower. The train begins leaving after five seconds.</li>
               <li><strong>Patience Refill:</strong> Dispatches refill patience based on capacity percentage: <code className="text-emerald-400 font-mono">Reward = MaxReward × (TotalOccupants / 16)</code>.</li>
               <li><strong>Perfect Train (16/16):</strong> Yields maximum patience refill, score multipliers, and builds an Efficiency Streak!</li>
               <li><strong>Odd-numbered Groups:</strong> Always leave odd slots that can be smoothly plugged using the Single Rider line.</li>
@@ -123,6 +131,7 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({ onClose }) => {
         {/* Dismiss Button */}
         <div className="mt-6 pt-4 border-t border-neutral-800">
           <button
+            data-controller-back
             onClick={onClose}
             className="w-full py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-neutral-950 font-mono font-extrabold text-xs transition-all cursor-pointer shadow-lg shadow-sky-500/20"
           >

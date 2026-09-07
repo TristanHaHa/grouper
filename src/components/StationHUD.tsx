@@ -32,18 +32,30 @@ import {
   SimulationStats,
 } from '../types';
 import { formatKeyName } from '../utils/keybinds';
+import type { PatienceClock, PatienceNotice } from '../game/patience';
+import { balancedService, BALANCED_PATIENCE, BALANCED_SCORE, queueExtraDrain, type QueuePressure, type ServiceTargets } from '../game/queueService';
+import type { GroupSplitAnalysis } from '../game/groupSplit';
 
 interface StationHUDProps {
   gameState: GameState;
   patience: number;
+  patienceClock: PatienceClock;
+  patienceNotices: PatienceNotice[];
+  patienceLossFlash?: boolean;
+  queuePressure: QueuePressure;
+  serviceTargets: ServiceTargets;
+  dispatchProgress: { label: string; seconds: number } | null;
   selectedGroup: GroupData | null;
   hoveredGateIndex?: number | null;
   selectedGateIndices?: number[];
   pendingAllocations?: { [gateIndex: number]: number };
+  groupSplitPreview?: GroupSplitAnalysis | null;
+  splitPenaltyKartIndices?: number[];
   gates: GateState[];
   stats: SimulationStats;
   target: InteractionTarget;
   isPointerLocked: boolean;
+  controllerEngaged?: boolean;
   soundEnabled: boolean;
   isZenMode: boolean;
   keybinds?: KeybindsConfig;
@@ -69,14 +81,23 @@ interface StationHUDProps {
 export const StationHUD: React.FC<StationHUDProps> = ({
   gameState,
   patience,
+  patienceClock,
+  patienceNotices,
+  patienceLossFlash = false,
+  queuePressure,
+  serviceTargets,
+  dispatchProgress,
   selectedGroup,
   hoveredGateIndex = 0,
   selectedGateIndices = [],
   pendingAllocations = {},
+  groupSplitPreview = null,
+  splitPenaltyKartIndices = [],
   gates,
   stats,
   target,
   isPointerLocked,
+  controllerEngaged = false,
   soundEnabled,
   isZenMode,
   keybinds,
@@ -99,6 +120,11 @@ export const StationHUD: React.FC<StationHUDProps> = ({
   const isTrainFull = boardingSeats === 16;
   const isTrainReady = boardingSeats > 0 && gameState === 'READY_STATE';
   const efficiency = Math.round((boardingSeats / 16) * 100);
+  const serviceProgress = balancedService(gates, serviceTargets);
+  const extraDrain = isZenMode ? 0 : queueExtraDrain(queuePressure);
+  const patiencePercent = isZenMode
+    ? 100
+    : Math.max(0, Math.min(100, Number.isFinite(patience) ? patience : 0));
 
   // Grouping Stage Calculation
   const totalAllocated = (Object.values(pendingAllocations) as number[]).reduce(
@@ -145,7 +171,7 @@ export const StationHUD: React.FC<StationHUDProps> = ({
       )}
 
       {/* --- TOP BAR: Operations Header & Live Metrics --- */}
-      <header className="flex items-start justify-between gap-4 pointer-events-auto">
+      <header className="flex flex-wrap md:flex-nowrap items-start justify-between gap-4 pointer-events-auto">
         {/* Ride Status Badge & Coaster Logo */}
         <div className="flex items-center gap-3 bg-neutral-900/90 backdrop-blur-md border border-neutral-700/80 rounded-xl px-4 py-2.5 shadow-xl">
           <div className="w-9 h-9 rounded-lg bg-red-500/20 border border-red-500/50 flex items-center justify-center text-red-400 font-black text-base">
@@ -178,12 +204,12 @@ export const StationHUD: React.FC<StationHUDProps> = ({
         </div>
 
         {/* Live Patience Bar / Zen Mode Gauge */}
-        <div className="flex-1 max-w-xl mx-auto px-4 hidden md:block">
-          <div className="bg-neutral-900/90 backdrop-blur-md border border-neutral-700/80 rounded-xl p-3 shadow-xl">
+        <div className="order-last basis-full md:order-none md:basis-auto flex-1 max-w-xl mx-auto md:px-4">
+          <div className={`bg-neutral-900/90 backdrop-blur-md border rounded-xl p-3 shadow-xl transition-colors ${patienceLossFlash ? 'border-rose-400 bg-rose-950/80 animate-pulse shadow-[0_0_20px_rgba(244,63,94,0.75)]' : 'border-neutral-700/80'}`}>
             <div className="flex items-center justify-between text-xs font-mono font-bold mb-1.5">
               <div className="flex items-center gap-1.5 text-neutral-300">
                 <Users className="w-3.5 h-3.5 text-sky-400" />
-                <span>GUEST PATIENCE</span>
+                <span>GUEST SATISFACTION</span>
                 {isZenMode ? (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
                     <InfinityIcon className="w-3 h-3" /> ZEN MODE (UNLIMITED)
@@ -214,26 +240,42 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                     <span className="text-xs opacity-75">(100%)</span>
                   </>
                 ) : (
-                  `${Math.round(patience)}%`
+                  `${Math.round(patiencePercent)}%`
                 )}
               </span>
             </div>
 
             {/* Patience Meter Bar */}
-            <div className="relative w-full h-3.5 bg-neutral-950 rounded-full overflow-hidden border border-neutral-800">
+            <div
+              className="relative w-full h-3.5 bg-neutral-950 rounded-full overflow-hidden border border-neutral-800"
+              role="progressbar"
+              aria-label="Guest patience"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={patiencePercent}
+            >
               <div
-                className={`h-full transition-all duration-300 rounded-full ${
-                  isZenMode
-                    ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-sky-400'
-                    : patience > 50
-                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
-                    : patience > 25
-                    ? 'bg-gradient-to-r from-amber-500 to-yellow-400'
-                    : 'bg-gradient-to-r from-rose-600 to-red-500 animate-pulse'
-                }`}
-                style={{ width: isZenMode ? '100%' : `${Math.max(0, Math.min(100, patience))}%` }}
+                className={`absolute inset-y-0 left-0 transition-[width,background-color] duration-300 rounded-full ${!isZenMode && patiencePercent <= 25 ? 'animate-pulse' : ''}`}
+                style={{ width: `${patiencePercent}%`, backgroundColor: `hsl(${patiencePercent * 1.2}, 85%, 52%)` }}
               />
             </div>
+            {!isZenMode && (
+              <div className="mt-2 text-[11px] font-mono" aria-live="polite">
+                {patienceClock.graceRemaining > 0 ? (
+                  <div className="text-sky-300">Get ready — patience starts draining in {Math.ceil(patienceClock.graceRemaining)}s</div>
+                ) : (
+                  <div className="text-neutral-400">Assign riders and dispatch trains to restore patience.</div>
+                )}
+                {patienceNotices.slice(-3).map(notice => (
+                  <div key={notice.id} className={`${notice.amount < 0 ? 'text-rose-300 font-bold' : 'text-emerald-300'} reward-pop`}>
+                    {notice.amount > 0 ? '+' : ''}{Number(notice.amount.toFixed(1))} — {notice.label}{notice.gateIndex !== undefined ? ` · G${notice.gateIndex + 1}` : ''}
+                  </div>
+                ))}
+                {extraDrain > 0 && (
+                  <div className="text-rose-300">Neglected queues: −{extraDrain.toFixed(2)} patience/s extra. Confirm a group to relieve its queue.</div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -286,6 +328,12 @@ export const StationHUD: React.FC<StationHUDProps> = ({
 
       {/* --- CENTER: Dynamic First-Person Crosshair & Raycast Prompts --- */}
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        {dispatchProgress && (
+          <div className="mb-4 rounded-xl border border-amber-400/60 bg-neutral-950/90 px-5 py-3 text-center shadow-xl" role="status">
+            <div className="text-xs font-mono font-bold text-amber-300 animate-pulse">{dispatchProgress.label}</div>
+            {dispatchProgress.seconds > 0 && <div className="mt-1 text-sm text-white">Departure in {dispatchProgress.seconds}s</div>}
+          </div>
+        )}
         {/* Dynamic Crosshair */}
         <div className="relative flex items-center justify-center">
           <div
@@ -309,7 +357,7 @@ export const StationHUD: React.FC<StationHUDProps> = ({
         )}
 
         {/* Pointer Lock Hint when not locked */}
-        {!isPointerLocked && (
+        {!isPointerLocked && !controllerEngaged && (
           <button
             onClick={onRequestPointerLock}
             className="mt-6 pointer-events-auto bg-neutral-900/90 hover:bg-neutral-800 border border-sky-500/50 hover:border-sky-400 text-sky-300 hover:text-white px-4 py-2 rounded-xl text-xs font-mono font-bold backdrop-blur-md shadow-2xl transition-all cursor-pointer flex items-center gap-2 group"
@@ -322,6 +370,12 @@ export const StationHUD: React.FC<StationHUDProps> = ({
 
       {/* --- BOTTOM SECTION: Train Layout Matrix, Compact Assignment Info, and Dispatch --- */}
       <footer className="flex flex-col gap-2 pointer-events-auto max-w-5xl mx-auto w-full">
+        <div className="grid grid-cols-2 gap-2 rounded-xl border border-neutral-700/80 bg-neutral-950/95 p-2">
+          <div className={`col-span-2 flex flex-wrap justify-between gap-1 px-1 text-[11px] font-mono ${serviceProgress.earned ? 'text-emerald-300' : 'text-neutral-300'}`}>
+            <span>Balanced service: {serviceTargets.mainGroups > 0 ? `Main groups ${Math.min(serviceProgress.completeMainGroups, serviceTargets.mainGroups)}/${serviceTargets.mainGroups}` : 'Main not required'} · {serviceTargets.singleRiders > 0 ? `Singles ${Math.min(serviceProgress.singleRiders, serviceTargets.singleRiders)}/${serviceTargets.singleRiders}` : 'Singles not required'}</span>
+            <span>{serviceProgress.earned ? 'Ready on dispatch' : 'Board this train'} · {isZenMode ? '' : `+${BALANCED_PATIENCE} patience · `}+{BALANCED_SCORE} score</span>
+          </div>
+        </div>
         {/* Mario Kart Train Occupancy & Operations Bar (Fixed Height - Never Expands) */}
         <div className={`bg-neutral-900/95 backdrop-blur-md rounded-2xl p-3 shadow-2xl transition-colors ${
           selectedGroup
@@ -485,6 +539,12 @@ export const StationHUD: React.FC<StationHUDProps> = ({
           </div>
 
           {/* 4 Vehicles containing 8 Gates Matrix */}
+          {selectedGroup && groupSplitPreview && groupSplitPreview.unnecessaryKarts > 0 && totalAllocated === selectedGroup.size && (
+            <div className="mb-2 rounded-lg border border-amber-400/70 bg-amber-950/80 px-3 py-2 text-[11px] font-mono text-amber-200 shadow-[0_0_14px_rgba(251,191,36,0.18)]">
+              This group could fit in {groupSplitPreview.minimumFeasibleKartCount} kart{groupSplitPreview.minimumFeasibleKartCount === 1 ? '' : 's'}. You’re using {groupSplitPreview.actualKartCount}.
+              {groupSplitPreview.alternativeKartIndices.length > 0 && <span className="ml-2 text-emerald-300">Outlined karts have room.</span>}
+            </div>
+          )}
           <div className="grid grid-cols-4 gap-2.5">
             {[0, 1, 2, 3].map((vIdx) => {
               const gateIdxA = vIdx * 2;
@@ -499,11 +559,19 @@ export const StationHUD: React.FC<StationHUDProps> = ({
               const isHoveredB = selectedGroup !== null && hoveredGateIndex === gateIdxB;
               const pendingA = pendingAllocations[gateIdxA] || 0;
               const pendingB = pendingAllocations[gateIdxB] || 0;
+              const isAlternativeKart = groupSplitPreview?.unnecessaryKarts && groupSplitPreview.alternativeKartIndices.includes(vIdx);
+              const isSplitPenaltyKart = splitPenaltyKartIndices.includes(vIdx);
 
               return (
                 <div
                   key={vIdx}
-                  className="rounded-xl p-2 flex flex-col gap-1.5 bg-neutral-950/85 border border-neutral-800 transition-all shadow-sm"
+                  className={`rounded-xl p-2 flex flex-col gap-1.5 bg-neutral-950/85 border transition-all shadow-sm ${
+                    isSplitPenaltyKart
+                      ? 'border-rose-400 ring-2 ring-amber-400 animate-pulse shadow-[0_0_20px_rgba(251,146,60,0.8)]'
+                      : isAlternativeKart
+                        ? 'border-emerald-400 ring-1 ring-emerald-400/70 shadow-[0_0_14px_rgba(52,211,153,0.35)]'
+                        : 'border-neutral-800'
+                  }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="text-[10px] font-mono text-amber-300 font-extrabold tracking-wider">
@@ -518,18 +586,17 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                     {/* Gate A */}
                     <button
                       type="button"
+                      disabled={gameState !== 'LOAD_STATE' && gameState !== 'READY_STATE'}
                       onClick={(e) => {
                         e.stopPropagation();
                         onAssignToGate?.(gateIdxA);
                       }}
                       title={`Gate ${gateIdxA + 1} (${occA}/4: ${Math.min(2, occA)} boarding, ${Math.max(0, occA - 2)} in queue) • Left Click to Select/Deselect`}
-                      className={`relative p-1.5 rounded-lg border flex flex-col items-center justify-center transition-all cursor-pointer select-none text-left w-full ${
+                      className={`relative rounded-lg flex flex-col items-center justify-center transition-all cursor-pointer select-none text-left w-full ${occA === 4 ? 'border-4 border-double p-[3px] outline outline-2 outline-offset-[3px] outline-cyan-300 shadow-[0_0_16px_rgba(34,211,238,0.8)]' : 'border p-1.5'} ${
                         isSelectedA
                           ? 'bg-sky-950/90 border-sky-400 text-sky-200 shadow-[0_0_14px_rgba(56,189,248,0.5)] ring-2 ring-sky-400'
-                          : isHoveredA
-                          ? 'bg-amber-950/50 border-amber-400 text-amber-200 shadow-[0_0_12px_rgba(245,158,11,0.4)] ring-2 ring-amber-400/80'
                           : occA === 4
-                          ? 'bg-cyan-950/70 border-cyan-400/80 text-cyan-200 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
+                          ? 'bg-emerald-950/60 border-emerald-400 text-emerald-300'
                           : occA >= 2
                           ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
                           : occA === 1
@@ -537,6 +604,12 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                           : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
                       }`}
                     >
+                      {patienceNotices.filter(notice => notice.gateIndex === gateIdxA).slice(-1).map(notice => (
+                        <span key={notice.id} className="absolute -top-5 left-1/2 -translate-x-1/2 z-10 whitespace-nowrap rounded bg-emerald-950 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300 reward-pop pointer-events-none">Double grouped +2</span>
+                      ))}
+                      {occA === 4 && (
+                        <span className="absolute -top-2 -left-2 z-10 rounded-full border-2 border-cyan-200 bg-cyan-500 px-1.5 py-0.5 text-[9px] font-black leading-none text-neutral-950 shadow-[0_0_10px_rgba(34,211,238,0.95)]">2×</span>
+                      )}
                       {isSelectedA && (
                         <span className="absolute -top-1.5 -right-1.5 bg-sky-400 text-neutral-950 font-mono font-black text-[9px] px-1.5 py-0.2 rounded-full shadow">
                           {pendingA > 0 ? `+${pendingA}` : 'SEL'}
@@ -544,7 +617,7 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                       )}
                       {/* Underline indication: only appears if currently hovered */}
                       {isHoveredA && (
-                        <div className="absolute -bottom-1 left-1.5 right-1.5 h-1 bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.95)] animate-pulse" />
+                        <div className="absolute -bottom-1 left-1.5 right-1.5 h-1 bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.95)]" />
                       )}
                       <div className="flex items-center justify-between w-full px-0.5">
                         <span className="text-[10px] font-mono font-bold">G{gateIdxA + 1}</span>
@@ -554,25 +627,23 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                         <span className={`text-[8px] font-mono font-bold px-1 py-0.2 rounded border ${
                           isSelectedA
                             ? 'bg-sky-400 text-neutral-950 border-sky-300'
-                            : isHoveredA
-                            ? 'bg-amber-400 text-neutral-950 border-amber-300'
                             : 'bg-neutral-800 text-neutral-300 border-neutral-700'
                         }`}>
                           {gateKeyLabels[gateIdxA]}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5 mt-1" title={`${Math.min(2, occA)} ready to board, ${Math.max(0, occA - 2)} queued behind`}>
+                      <div className="flex flex-col items-center gap-0.5 mt-1" title={`${Math.min(2, occA)} ready to board, ${Math.max(0, occA - 2)} queued behind`}>
                         {/* Front row (boarding) */}
                         <div className="flex items-center gap-0.5">
                           <div className={`w-2 h-2 rounded-full transition-colors ${occA >= 1 ? 'bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.7)]' : 'bg-neutral-700'}`} />
                           <div className={`w-2 h-2 rounded-full transition-colors ${occA >= 2 ? 'bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.7)]' : 'bg-neutral-700'}`} />
                         </div>
                         {/* Queue divider */}
-                        <div className="w-px h-2.5 bg-neutral-700/80" />
+                        <div className="w-5 h-px bg-neutral-700/80" />
                         {/* Queue row (waiting behind) */}
                         <div className="flex items-center gap-0.5">
-                          <div className={`w-2 h-2 rounded-sm transition-colors ${occA >= 3 ? 'bg-sky-400 shadow-[0_0_5px_rgba(56,189,248,0.7)]' : 'bg-neutral-800 border border-neutral-700'}`} />
-                          <div className={`w-2 h-2 rounded-sm transition-colors ${occA >= 4 ? 'bg-sky-400 shadow-[0_0_5px_rgba(56,189,248,0.7)]' : 'bg-neutral-800 border border-neutral-700'}`} />
+                          <div className={`rounded-sm transition-all ${occA >= 3 ? 'w-2.5 h-2.5 bg-cyan-300 shadow-[0_0_7px_rgba(34,211,238,0.9)]' : 'w-2 h-2 bg-neutral-800 border border-neutral-700'}`} />
+                          <div className={`rounded-sm transition-all ${occA >= 4 ? 'w-2.5 h-2.5 bg-cyan-300 shadow-[0_0_7px_rgba(34,211,238,0.9)]' : 'w-2 h-2 bg-neutral-800 border border-neutral-700'}`} />
                         </div>
                       </div>
                     </button>
@@ -580,18 +651,17 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                     {/* Gate B */}
                     <button
                       type="button"
+                      disabled={gameState !== 'LOAD_STATE' && gameState !== 'READY_STATE'}
                       onClick={(e) => {
                         e.stopPropagation();
                         onAssignToGate?.(gateIdxB);
                       }}
                       title={`Gate ${gateIdxB + 1} (${occB}/4: ${Math.min(2, occB)} boarding, ${Math.max(0, occB - 2)} in queue) • Left Click to Select/Deselect`}
-                      className={`relative p-1.5 rounded-lg border flex flex-col items-center justify-center transition-all cursor-pointer select-none text-left w-full ${
+                      className={`relative rounded-lg flex flex-col items-center justify-center transition-all cursor-pointer select-none text-left w-full ${occB === 4 ? 'border-4 border-double p-[3px] outline outline-2 outline-offset-[3px] outline-cyan-300 shadow-[0_0_16px_rgba(34,211,238,0.8)]' : 'border p-1.5'} ${
                         isSelectedB
                           ? 'bg-sky-950/90 border-sky-400 text-sky-200 shadow-[0_0_14px_rgba(56,189,248,0.5)] ring-2 ring-sky-400'
-                          : isHoveredB
-                          ? 'bg-amber-950/50 border-amber-400 text-amber-200 shadow-[0_0_12px_rgba(245,158,11,0.4)] ring-2 ring-amber-400/80'
                           : occB === 4
-                          ? 'bg-cyan-950/70 border-cyan-400/80 text-cyan-200 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
+                          ? 'bg-emerald-950/60 border-emerald-400 text-emerald-300'
                           : occB >= 2
                           ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
                           : occB === 1
@@ -599,6 +669,12 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                           : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
                       }`}
                     >
+                      {patienceNotices.filter(notice => notice.gateIndex === gateIdxB).slice(-1).map(notice => (
+                        <span key={notice.id} className="absolute -top-5 left-1/2 -translate-x-1/2 z-10 whitespace-nowrap rounded bg-emerald-950 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300 reward-pop pointer-events-none">Double grouped +2</span>
+                      ))}
+                      {occB === 4 && (
+                        <span className="absolute -top-2 -left-2 z-10 rounded-full border-2 border-cyan-200 bg-cyan-500 px-1.5 py-0.5 text-[9px] font-black leading-none text-neutral-950 shadow-[0_0_10px_rgba(34,211,238,0.95)]">2×</span>
+                      )}
                       {isSelectedB && (
                         <span className="absolute -top-1.5 -right-1.5 bg-sky-400 text-neutral-950 font-mono font-black text-[9px] px-1.5 py-0.2 rounded-full shadow">
                           {pendingB > 0 ? `+${pendingB}` : 'SEL'}
@@ -606,7 +682,7 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                       )}
                       {/* Underline indication: only appears if currently hovered */}
                       {isHoveredB && (
-                        <div className="absolute -bottom-1 left-1.5 right-1.5 h-1 bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.95)] animate-pulse" />
+                        <div className="absolute -bottom-1 left-1.5 right-1.5 h-1 bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.95)]" />
                       )}
                       <div className="flex items-center justify-between w-full px-0.5">
                         <span className="text-[10px] font-mono font-bold">G{gateIdxB + 1}</span>
@@ -616,25 +692,23 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                         <span className={`text-[8px] font-mono font-bold px-1 py-0.2 rounded border ${
                           isSelectedB
                             ? 'bg-sky-400 text-neutral-950 border-sky-300'
-                            : isHoveredB
-                            ? 'bg-amber-400 text-neutral-950 border-amber-300'
                             : 'bg-neutral-800 text-neutral-300 border-neutral-700'
                         }`}>
                           {gateKeyLabels[gateIdxB]}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5 mt-1" title={`${Math.min(2, occB)} ready to board, ${Math.max(0, occB - 2)} queued behind`}>
+                      <div className="flex flex-col items-center gap-0.5 mt-1" title={`${Math.min(2, occB)} ready to board, ${Math.max(0, occB - 2)} queued behind`}>
                         {/* Front row (boarding) */}
                         <div className="flex items-center gap-0.5">
                           <div className={`w-2 h-2 rounded-full transition-colors ${occB >= 1 ? 'bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.7)]' : 'bg-neutral-700'}`} />
                           <div className={`w-2 h-2 rounded-full transition-colors ${occB >= 2 ? 'bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.7)]' : 'bg-neutral-700'}`} />
                         </div>
                         {/* Queue divider */}
-                        <div className="w-px h-2.5 bg-neutral-700/80" />
+                        <div className="w-5 h-px bg-neutral-700/80" />
                         {/* Queue row (waiting behind) */}
                         <div className="flex items-center gap-0.5">
-                          <div className={`w-2 h-2 rounded-sm transition-colors ${occB >= 3 ? 'bg-sky-400 shadow-[0_0_5px_rgba(56,189,248,0.7)]' : 'bg-neutral-800 border border-neutral-700'}`} />
-                          <div className={`w-2 h-2 rounded-sm transition-colors ${occB >= 4 ? 'bg-sky-400 shadow-[0_0_5px_rgba(56,189,248,0.7)]' : 'bg-neutral-800 border border-neutral-700'}`} />
+                          <div className={`rounded-sm transition-all ${occB >= 3 ? 'w-2.5 h-2.5 bg-cyan-300 shadow-[0_0_7px_rgba(34,211,238,0.9)]' : 'w-2 h-2 bg-neutral-800 border border-neutral-700'}`} />
+                          <div className={`rounded-sm transition-all ${occB >= 4 ? 'w-2.5 h-2.5 bg-cyan-300 shadow-[0_0_7px_rgba(34,211,238,0.9)]' : 'w-2 h-2 bg-neutral-800 border border-neutral-700'}`} />
                         </div>
                       </div>
                     </button>
@@ -644,8 +718,8 @@ export const StationHUD: React.FC<StationHUDProps> = ({
             })}
           </div>
 
-          {/* Dispatch Action Control Bar */}
-          <div className="mt-3 flex items-center justify-between gap-4">
+          {/* Dispatch stays on the physical console; keep only the compact control hints in the HUD. */}
+          <div className="mt-3 flex items-center gap-4">
             <div className="text-xs text-neutral-400 font-mono hidden sm:block">
               {selectedGroup ? (
                 <span>
@@ -662,30 +736,6 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                 </span>
               )}
             </div>
-
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onTriggerDispatch();
-              }}
-              disabled={boardingSeats === 0 || gameState === 'DISPATCH_STATE' || gameState === 'RESET_STATE'}
-              className={`flex-1 sm:flex-none px-6 py-2.5 rounded-xl font-mono font-extrabold text-sm flex items-center justify-center gap-2 shadow-xl transition-all cursor-pointer ${
-                boardingSeats === 16
-                  ? 'bg-emerald-500 hover:bg-emerald-400 text-neutral-950 border border-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.5)] animate-pulse'
-                  : boardingSeats > 0
-                  ? 'bg-sky-600 hover:bg-sky-500 text-white border border-sky-400'
-                  : 'bg-neutral-800 text-neutral-500 border border-neutral-700 cursor-not-allowed'
-              }`}
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>
-                {boardingSeats === 16
-                  ? '⚡ DISPATCH PERFECT TRAIN (16/16)!'
-                  : boardingSeats > 0
-                  ? `DISPATCH TRAIN (${boardingSeats}/16)`
-                  : 'FILL SEATS TO DISPATCH'}
-              </span>
-            </button>
           </div>
         </div>
       </footer>
