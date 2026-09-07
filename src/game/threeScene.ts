@@ -13,8 +13,17 @@ import {
   GATE_COUNT,
   GATE_LINE_X,
   GATE_Z_POSITIONS,
+  INSIDE_GATE_LINE_X,
+  INSIDE_MAIN_QUEUE_STOP_X,
+  INSIDE_SINGLE_QUEUE_STOP_X,
+  INSIDE_TRACK_X,
   MAIN_QUEUE_STOP_X,
   MAIN_QUEUE_STOP_Z,
+  OUTSIDE_GATE_LINE_X,
+  OUTSIDE_MAIN_QUEUE_STOP_X,
+  OUTSIDE_SINGLE_QUEUE_STOP_X,
+  OUTSIDE_TRACK_X,
+  QUEUE_HIGHLIGHT_COLOR,
   SINGLE_QUEUE_STOP_X,
   SINGLE_QUEUE_STOP_Z,
   TRACK_X,
@@ -29,6 +38,7 @@ import {
   KeybindsConfig,
   DEFAULT_KEYBINDS,
   NPCData,
+  TrackType,
   VehicleState
 } from '../types';
 
@@ -39,6 +49,8 @@ export interface SceneCallbacks {
   onAssignToGate: (gateIndex: number) => void;
   onConfirmGrouping?: () => void;
   onTriggerDispatch: () => void;
+  onTriggerDispatchTrack?: (track: TrackType) => void;
+  onSwitchTrack?: () => void;
   onDeselect: () => void;
   onTogglePause?: () => void;
   onSwitchKartBank?: (bank: 0 | 1) => void;
@@ -154,6 +166,50 @@ export class RideStation3D {
   private singleQueueBadge: THREE.Sprite | null = null;
   private mainQueueHighlight: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null = null;
   private singleQueueHighlight: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null = null;
+
+  // Dual Track State & Visuals
+  public activeTrack: TrackType = 'inside';
+  private outsideTrainGroup = new THREE.Group();
+  private outsideActiveTrain: TrainInstance | null = null;
+  private outsideWaitingTrainQueue: TrainInstance[] = [];
+  private outsideVehicleMeshes: THREE.Group[] = [];
+  private outsideLapBarGroups: THREE.Group[] = [];
+  private outsideGateIndicators: {
+    baseMesh: THREE.Mesh;
+    lightMesh: THREE.Mesh;
+    queueLightMesh?: THREE.Mesh;
+    labelMesh: THREE.Sprite;
+    gateBarrier: THREE.Group;
+  }[] = [];
+  private outsideGateGhostHighlights: THREE.Mesh[] = [];
+  private outsideGateFloorLines: THREE.Mesh[] = [];
+  private outsideGatesState: GateState[] = [];
+  private outsideDispatchButtonMesh: THREE.Mesh | null = null;
+  private outsideDispatchSequence: {
+    elapsed: number;
+    launched: boolean;
+    restraintsLocked: boolean;
+    lastProgress: string;
+    onFinish: () => void;
+    riders: { mesh: THREE.Group; start: THREE.Vector3; seat: THREE.Vector3; attached: boolean }[];
+  } | null = null;
+  private outsideResetAnimation: ((delta: number) => void) | null = null;
+  private outsideTrainSpeedZ = 0;
+  private outsideLapBarAngle = 0;
+  public outsideGameState: GameState = 'LOAD_STATE';
+  private outsideLaunchParticles: THREE.Points | null = null;
+
+  // Queues 3D Visuals for outside track
+  private outsideMainQueueGroup = new THREE.Group();
+  private outsideSingleQueueGroup = new THREE.Group();
+  private outsideMainStopLineMesh: THREE.Mesh | null = null;
+  private outsideSingleStopLineMesh: THREE.Mesh | null = null;
+  private outsideMainQueueBadge: THREE.Sprite | null = null;
+  private outsideSingleQueueBadge: THREE.Sprite | null = null;
+  private outsideMainQueueHighlight: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null = null;
+  private outsideSingleQueueHighlight: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null = null;
+  private lastOutsideMainQueue: GroupData[] = [];
+  private lastOutsideSingleQueue: GroupData[] = [];
 
   // State caches
   private currentGameState: GameState = 'LOAD_STATE';
@@ -306,8 +362,8 @@ export class RideStation3D {
 
   // --- Station Architecture ---
   private buildStationArchitecture() {
-    // Station Floor (Polished Slate steel platform with high visibility)
-    const floorGeo = new THREE.PlaneGeometry(16, 22);
+    // Station Floor (Expanded steel platform encompassing inside track, central station, and outside track)
+    const floorGeo = new THREE.PlaneGeometry(19, 24);
     const floorMat = new THREE.MeshStandardMaterial({
       color: '#334155',
       roughness: 0.35,
@@ -315,37 +371,41 @@ export class RideStation3D {
     });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0.5, 0, 0);
+    floor.position.set(0, 0, 0);
     floor.receiveShadow = true;
     this.scene.add(floor);
 
-    // Yellow/Black Hazard Strip along track edge
-    const hazardGeo = new THREE.PlaneGeometry(0.35, 18);
+    // Hazard Strip along Inside Track edge (X = -4.0)
+    const hazardGeo = new THREE.PlaneGeometry(0.35, 20);
     const hazardMat = new THREE.MeshBasicMaterial({
       color: '#fbbf24',
     });
-    const hazardStrip = new THREE.Mesh(hazardGeo, hazardMat);
-    hazardStrip.rotation.x = -Math.PI / 2;
-    hazardStrip.position.set(-2.0, 0.005, 0);
-    this.scene.add(hazardStrip);
+    const insideHazardStrip = new THREE.Mesh(hazardGeo, hazardMat);
+    insideHazardStrip.rotation.x = -Math.PI / 2;
+    insideHazardStrip.position.set(INSIDE_GATE_LINE_X - 0.25, 0.005, 0);
+    this.scene.add(insideHazardStrip);
 
-    // Back Wall (Behind Queue at X = 6.5) - Lighter Slate Panel Architecture
-    const backWallGeo = new THREE.BoxGeometry(0.5, 7, 22);
+    // Hazard Strip along Outside Track edge (X = +4.0)
+    const outsideHazardStrip = new THREE.Mesh(hazardGeo, hazardMat);
+    outsideHazardStrip.rotation.x = -Math.PI / 2;
+    outsideHazardStrip.position.set(OUTSIDE_GATE_LINE_X + 0.25, 0.005, 0);
+    this.scene.add(outsideHazardStrip);
+
+    // Outer Boundary Track Walls at X = -8.2 and X = +8.2
     const wallMat = new THREE.MeshStandardMaterial({
       color: '#475569',
       roughness: 0.6,
       metalness: 0.3,
     });
-    const backWall = new THREE.Mesh(backWallGeo, wallMat);
-    backWall.position.set(6.0, 3.5, 0);
-    this.scene.add(backWall);
+    const leftTrackWall = new THREE.Mesh(new THREE.BoxGeometry(0.5, 7, 24), wallMat);
+    leftTrackWall.position.set(-8.2, 3.5, 0);
+    this.scene.add(leftTrackWall);
 
-    // Outer Track Wall at X = -6.5
-    const trackWall = new THREE.Mesh(backWallGeo, wallMat);
-    trackWall.position.set(-6.5, 3.5, 0);
-    this.scene.add(trackWall);
+    const rightTrackWall = new THREE.Mesh(new THREE.BoxGeometry(0.5, 7, 24), wallMat);
+    rightTrackWall.position.set(8.2, 3.5, 0);
+    this.scene.add(rightTrackWall);
 
-    // North & South Station Portal Walls (Built with 3.2m open tunnel archways at TRACK_X = -3.5)
+    // North & South Station Portal Walls (Built with open tunnel archways at INSIDE_TRACK_X and OUTSIDE_TRACK_X)
     const portalMat = new THREE.MeshStandardMaterial({
       color: '#334155',
       roughness: 0.5,
@@ -358,39 +418,41 @@ export class RideStation3D {
       roughness: 0.2,
     });
 
-    [-10.5, 10.5].forEach((endZ) => {
-      // Platform Side Wall Slab (X = -1.9 to 6.0)
-      const platWallGeo = new THREE.BoxGeometry(8.0, 7.0, 0.5);
-      const platWall = new THREE.Mesh(platWallGeo, wallMat);
-      platWall.position.set(2.0, 3.5, endZ);
-      this.scene.add(platWall);
+    [-11.5, 11.5].forEach((endZ) => {
+      // Central Platform Wall between the two tracks (X = -3.8 to +3.8)
+      const centerPlatWall = new THREE.Mesh(new THREE.BoxGeometry(7.4, 7.0, 0.5), wallMat);
+      centerPlatWall.position.set(0, 3.5, endZ);
+      this.scene.add(centerPlatWall);
 
-      // Outer Maintenance Side Wall Slab (X = -6.5 to -5.1)
-      const outerWallGeo = new THREE.BoxGeometry(1.5, 7.0, 0.5);
-      const outerWall = new THREE.Mesh(outerWallGeo, wallMat);
-      outerWall.position.set(-5.75, 3.5, endZ);
-      this.scene.add(outerWall);
+      // Portals for both tracks
+      [INSIDE_TRACK_X, OUTSIDE_TRACK_X].forEach((tX) => {
+        // Tunnel Header Beam overhead
+        const headerWall = new THREE.Mesh(new THREE.BoxGeometry(3.3, 3.4, 0.5), portalMat);
+        headerWall.position.set(tX, 5.3, endZ);
+        this.scene.add(headerWall);
 
-      // Tunnel Header Beam overhead (Y = 3.6 to 7.0)
-      const headerGeo = new THREE.BoxGeometry(3.3, 3.4, 0.5);
-      const headerWall = new THREE.Mesh(headerGeo, portalMat);
-      headerWall.position.set(TRACK_X, 5.3, endZ);
-      this.scene.add(headerWall);
+        // Glowing Neon Tunnel Portal Arch Ring around the train opening
+        const archTop = new THREE.Mesh(new THREE.BoxGeometry(3.3, 0.2, 0.65), portalRimMat);
+        archTop.position.set(tX, 3.6, endZ);
+        this.scene.add(archTop);
 
-      // Glowing Neon Tunnel Portal Arch Ring around the train opening
-      const archTopGeo = new THREE.BoxGeometry(3.3, 0.2, 0.65);
-      const archTop = new THREE.Mesh(archTopGeo, portalRimMat);
-      archTop.position.set(TRACK_X, 3.6, endZ);
-      this.scene.add(archTop);
+        const archLeft = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.6, 0.65), portalRimMat);
+        archLeft.position.set(tX - 1.6, 1.8, endZ);
+        this.scene.add(archLeft);
 
-      const archSideGeo = new THREE.BoxGeometry(0.2, 3.6, 0.65);
-      const archLeft = new THREE.Mesh(archSideGeo, portalRimMat);
-      archLeft.position.set(TRACK_X - 1.6, 1.8, endZ);
-      this.scene.add(archLeft);
+        const archRight = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.6, 0.65), portalRimMat);
+        archRight.position.set(tX + 1.6, 1.8, endZ);
+        this.scene.add(archRight);
+      });
 
-      const archRight = new THREE.Mesh(archSideGeo, portalRimMat);
-      archRight.position.set(TRACK_X + 1.6, 1.8, endZ);
-      this.scene.add(archRight);
+      // Outer maintenance wall flanks
+      const leftOuterWall = new THREE.Mesh(new THREE.BoxGeometry(1.2, 7.0, 0.5), wallMat);
+      leftOuterWall.position.set(-7.5, 3.5, endZ);
+      this.scene.add(leftOuterWall);
+
+      const rightOuterWall = new THREE.Mesh(new THREE.BoxGeometry(1.2, 7.0, 0.5), wallMat);
+      rightOuterWall.position.set(7.5, 3.5, endZ);
+      this.scene.add(rightOuterWall);
     });
 
     // Steel Box Trusses overhead with Integrated Linear Light Fixtures
@@ -403,13 +465,13 @@ export class RideStation3D {
     });
 
     for (let z = -8; z <= 8; z += 4) {
-      const beamGeo = new THREE.BoxGeometry(12, 0.3, 0.3);
+      const beamGeo = new THREE.BoxGeometry(16.5, 0.3, 0.3);
       const beam = new THREE.Mesh(beamGeo, trussMat);
       beam.position.set(0, 5.8, z);
       this.scene.add(beam);
 
       // Linear LED Light Bar under each beam
-      const lightBarGeo = new THREE.BoxGeometry(10, 0.08, 0.12);
+      const lightBarGeo = new THREE.BoxGeometry(15, 0.08, 0.12);
       const lightBar = new THREE.Mesh(lightBarGeo, fixtureMat);
       lightBar.position.set(0, 5.62, z);
       this.scene.add(lightBar);
@@ -441,55 +503,55 @@ export class RideStation3D {
     this.scene.add(bannerMesh);
   }
 
-  // --- Roller Coaster Track ---
+  // --- Roller Coaster Track (Dual mirrored tracks: Inside & Outside) ---
   private buildRollerCoasterTrack() {
     const trackGroup = new THREE.Group();
-
-    // Two steel tubular rails running down X = -3.5 spanning station, staging queue, and launch run
     const railMat = new THREE.MeshStandardMaterial({ color: '#0284c7', metalness: 0.9, roughness: 0.2 });
     const trackLength = 160;
     const trackCenterZ = 0;
     const railGeo = new THREE.CylinderGeometry(0.06, 0.06, trackLength, 16);
-
-    const leftRail = new THREE.Mesh(railGeo, railMat);
-    leftRail.position.set(TRACK_X - 0.5, 0.35, trackCenterZ);
-    leftRail.rotation.x = Math.PI / 2;
-    trackGroup.add(leftRail);
-
-    const rightRail = new THREE.Mesh(railGeo, railMat);
-    rightRail.position.set(TRACK_X + 0.5, 0.35, trackCenterZ);
-    rightRail.rotation.x = Math.PI / 2;
-    trackGroup.add(rightRail);
-
-    // Center Spine Pipe
     const spineGeo = new THREE.CylinderGeometry(0.12, 0.12, trackLength, 16);
-    const spine = new THREE.Mesh(spineGeo, railMat);
-    spine.position.set(TRACK_X, 0.15, trackCenterZ);
-    spine.rotation.x = Math.PI / 2;
-    trackGroup.add(spine);
-
-    // Cross ties & magnetic launch stators (LSM magnets)
     const tieMat = new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.8, roughness: 0.4 });
     const statorMat = new THREE.MeshStandardMaterial({ color: '#e11d48', metalness: 0.6, roughness: 0.3, emissive: '#881337', emissiveIntensity: 0.4 });
 
-    for (let z = -75; z <= 75; z += 0.8) {
-      const tieGeo = new THREE.BoxGeometry(1.3, 0.05, 0.1);
-      const tie = new THREE.Mesh(tieGeo, tieMat);
-      tie.position.set(TRACK_X, 0.32, z);
-      trackGroup.add(tie);
+    [INSIDE_TRACK_X, OUTSIDE_TRACK_X].forEach((tX) => {
+      // Two steel tubular rails running down tX spanning station, staging queue, and launch run
+      const leftRail = new THREE.Mesh(railGeo, railMat);
+      leftRail.position.set(tX - 0.5, 0.35, trackCenterZ);
+      leftRail.rotation.x = Math.PI / 2;
+      trackGroup.add(leftRail);
 
-      // Launch stator block in the middle
-      const statorGeo = new THREE.BoxGeometry(0.35, 0.12, 0.4);
-      const stator = new THREE.Mesh(statorGeo, statorMat);
-      stator.position.set(TRACK_X, 0.28, z);
-      trackGroup.add(stator);
-    }
+      const rightRail = new THREE.Mesh(railGeo, railMat);
+      rightRail.position.set(tX + 0.5, 0.35, trackCenterZ);
+      rightRail.rotation.x = Math.PI / 2;
+      trackGroup.add(rightRail);
+
+      // Center Spine Pipe
+      const spine = new THREE.Mesh(spineGeo, railMat);
+      spine.position.set(tX, 0.15, trackCenterZ);
+      spine.rotation.x = Math.PI / 2;
+      trackGroup.add(spine);
+
+      // Cross ties & magnetic launch stators (LSM magnets)
+      for (let z = -75; z <= 75; z += 0.8) {
+        const tieGeo = new THREE.BoxGeometry(1.3, 0.05, 0.1);
+        const tie = new THREE.Mesh(tieGeo, tieMat);
+        tie.position.set(tX, 0.32, z);
+        trackGroup.add(tie);
+
+        // Launch stator block in the middle
+        const statorGeo = new THREE.BoxGeometry(0.35, 0.12, 0.4);
+        const stator = new THREE.Mesh(statorGeo, statorMat);
+        stator.position.set(tX, 0.28, z);
+        trackGroup.add(stator);
+      }
+    });
 
     this.scene.add(trackGroup);
   }
 
   // --- Procedural 4-Car Coaster Train Builder ---
-  private createTrainInstance(colorHex: string, initialZ: number): TrainInstance {
+  private createTrainInstance(colorHex: string, initialZ: number, trackX: number = INSIDE_TRACK_X): TrainInstance {
     const group = new THREE.Group();
     group.position.set(0, 0, initialZ);
 
@@ -535,7 +597,7 @@ export class RideStation3D {
     for (let v = 0; v < VEHICLE_COUNT; v++) {
       const zCenter = VEHICLE_Z_CENTERS[v];
       const vehicle = new THREE.Group();
-      vehicle.position.set(TRACK_X, 0.42, zCenter);
+      vehicle.position.set(trackX, 0.42, zCenter);
 
       // Vehicle Chassis
       const chassisGeo = new THREE.BoxGeometry(1.6, 0.35, 2.5);
@@ -651,7 +713,7 @@ export class RideStation3D {
       const gapLength = Math.abs(z1 - z2);
 
       const couplingGroup = new THREE.Group();
-      couplingGroup.position.set(TRACK_X, 0.42, midZ);
+      couplingGroup.position.set(trackX, 0.42, midZ);
 
       const drawbarGeo = new THREE.BoxGeometry(0.22, 0.12, gapLength + 0.3);
       const drawbar = new THREE.Mesh(drawbarGeo, couplerMat);
@@ -692,20 +754,31 @@ export class RideStation3D {
     };
   }
 
-  // --- Initialize Station Train & Waiting Queue of Trains ---
+  // --- Initialize Station Train & Waiting Queue of Trains for Both Tracks ---
   private buildCoasterTrain() {
-    // 1. Create active station loading train at Z = 0
-    this.activeTrain = this.createTrainInstance(this.trainColorPalette[0], 0);
+    // 1. Inside track train (Station track at INSIDE_TRACK_X = -5.6)
+    this.activeTrain = this.createTrainInstance(this.trainColorPalette[0], 0, INSIDE_TRACK_X);
     this.trainGroup = this.activeTrain.group;
     this.vehicleMeshes = this.activeTrain.vehicleMeshes;
     this.lapBarGroups = this.activeTrain.lapBarGroups;
     this.trainColorCounter = 1;
 
-    // 2. Create visible queue of trains waiting behind the station on staging track
     this.waitingTrainQueue = [
-      this.createTrainInstance(this.trainColorPalette[1], -17),
-      this.createTrainInstance(this.trainColorPalette[2], -34),
-      this.createTrainInstance(this.trainColorPalette[3], -51),
+      this.createTrainInstance(this.trainColorPalette[1], -17, INSIDE_TRACK_X),
+      this.createTrainInstance(this.trainColorPalette[2], -34, INSIDE_TRACK_X),
+      this.createTrainInstance(this.trainColorPalette[3], -51, INSIDE_TRACK_X),
+    ];
+
+    // 2. Outside track train (Station track at OUTSIDE_TRACK_X = 5.6)
+    this.outsideActiveTrain = this.createTrainInstance(this.trainColorPalette[4], 0, OUTSIDE_TRACK_X);
+    this.outsideTrainGroup = this.outsideActiveTrain.group;
+    this.outsideVehicleMeshes = this.outsideActiveTrain.vehicleMeshes;
+    this.outsideLapBarGroups = this.outsideActiveTrain.lapBarGroups;
+
+    this.outsideWaitingTrainQueue = [
+      this.createTrainInstance(this.trainColorPalette[5], -17, OUTSIDE_TRACK_X),
+      this.createTrainInstance(this.trainColorPalette[6 % this.trainColorPalette.length], -34, OUTSIDE_TRACK_X),
+      this.createTrainInstance(this.trainColorPalette[0], -51, OUTSIDE_TRACK_X),
     ];
   }
 
@@ -886,8 +959,8 @@ export class RideStation3D {
     this.mainQueueGroup.add(this.mainStopLineMesh);
     this.interactables.push(this.mainStopLineMesh);
 
-    this.mainQueueHighlight = this.createQueueAreaHighlight(2.05, 6.7, '#f97316');
-    this.mainQueueHighlight.position.set(MAIN_QUEUE_STOP_X, 0.018, MAIN_QUEUE_STOP_Z + 3);
+    this.mainQueueHighlight = this.createQueueAreaHighlight(2.1, 7.2, '#f97316');
+    this.mainQueueHighlight.position.set(MAIN_QUEUE_STOP_X, 0.02, MAIN_QUEUE_STOP_Z + 3.2);
     this.mainQueueGroup.add(this.mainQueueHighlight);
 
     // Volumetric large invisible hitbox for Main Queue selection (covers guests, line, and sign)
@@ -953,8 +1026,8 @@ export class RideStation3D {
     this.singleQueueGroup.add(this.singleStopLineMesh);
     this.interactables.push(this.singleStopLineMesh);
 
-    this.singleQueueHighlight = this.createQueueAreaHighlight(1.7, 6.7, '#22d3ee');
-    this.singleQueueHighlight.position.set(SINGLE_QUEUE_STOP_X, 0.018, SINGLE_QUEUE_STOP_Z - 3);
+    this.singleQueueHighlight = this.createQueueAreaHighlight(1.8, 7.2, '#22d3ee');
+    this.singleQueueHighlight.position.set(SINGLE_QUEUE_STOP_X, 0.02, SINGLE_QUEUE_STOP_Z - 3.2);
     this.singleQueueGroup.add(this.singleQueueHighlight);
 
     // Volumetric large invisible hitbox for Single Queue selection
@@ -998,7 +1071,7 @@ export class RideStation3D {
     const material = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.16,
+      opacity: 0.45,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
@@ -1006,14 +1079,47 @@ export class RideStation3D {
     const highlight = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), material);
     highlight.rotation.x = -Math.PI / 2;
     highlight.visible = false;
-    highlight.renderOrder = 1;
+    highlight.renderOrder = 2;
 
+    // Outer perimeter glowing border
     const border = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.PlaneGeometry(width, depth)),
-      new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false }),
+      new THREE.LineBasicMaterial({ color, transparent: true, opacity: 1.0, depthWrite: false }),
     );
-    border.position.z = 0.004;
+    border.position.z = 0.005;
     highlight.add(border);
+
+    // Runway guide lines along the queue floor
+    const hatchGroup = new THREE.Group();
+    const hatchCount = 5;
+    const hatchStep = depth / (hatchCount + 1);
+    const hatchMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.8, depthWrite: false });
+    for (let i = 1; i <= hatchCount; i++) {
+      const yPos = -depth / 2 + i * hatchStep;
+      const hatchPoints = [
+        new THREE.Vector3(-width * 0.38, yPos, 0.006),
+        new THREE.Vector3(width * 0.38, yPos, 0.006),
+      ];
+      const hatchGeo = new THREE.BufferGeometry().setFromPoints(hatchPoints);
+      const hatchLine = new THREE.Line(hatchGeo, hatchMat);
+      hatchGroup.add(hatchLine);
+    }
+    highlight.add(hatchGroup);
+
+    // Front-of-queue caller spotlight pad under the leading party
+    const ringGeo = new THREE.RingGeometry(0.2, 0.65, 32);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+    ringMesh.position.set(0, -depth / 2 + 0.75, 0.007);
+    highlight.add(ringMesh);
+
     return highlight;
   }
 
@@ -2440,8 +2546,26 @@ export class RideStation3D {
     if (this.singleQueueBadge) {
       this.singleQueueBadge.position.y = 2.5 + Math.sin(time * 2.5 + 1.0) * 0.08;
     }
-    for (const highlight of [this.mainQueueHighlight, this.singleQueueHighlight]) {
-      if (highlight?.visible) highlight.material.opacity = 0.13 + Math.sin(time * 4) * 0.05;
+    if (this.mainQueueHighlight?.visible) {
+      this.mainQueueHighlight.material.opacity = 0.45 + Math.sin(time * 3.5) * 0.12;
+      if (this.mainStopLineMesh) {
+        (this.mainStopLineMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.6 + Math.sin(time * 4) * 0.4;
+        (this.mainStopLineMesh.material as THREE.MeshStandardMaterial).emissive.set('#f59e0b');
+      }
+    } else if (this.mainStopLineMesh) {
+      (this.mainStopLineMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.6;
+      (this.mainStopLineMesh.material as THREE.MeshStandardMaterial).emissive.set('#1d4ed8');
+    }
+
+    if (this.singleQueueHighlight?.visible) {
+      this.singleQueueHighlight.material.opacity = 0.45 + Math.sin(time * 3.5) * 0.12;
+      if (this.singleStopLineMesh) {
+        (this.singleStopLineMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.6 + Math.sin(time * 4) * 0.4;
+        (this.singleStopLineMesh.material as THREE.MeshStandardMaterial).emissive.set('#06b6d4');
+      }
+    } else if (this.singleStopLineMesh) {
+      (this.singleStopLineMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.6;
+      (this.singleStopLineMesh.material as THREE.MeshStandardMaterial).emissive.set('#0891b2');
     }
 
     // 6. Update Raycasting Targets

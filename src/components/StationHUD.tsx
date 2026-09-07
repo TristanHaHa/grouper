@@ -72,6 +72,15 @@ interface StationHUDProps {
   onAssignToGate: (gateIndex: number) => void;
   onConfirmGrouping?: () => void;
   onTriggerDispatch: () => void;
+  onTriggerDispatchTrack?: (track: 'inside' | 'outside') => void;
+  onSwitchTrack?: () => void;
+  activeTrack?: 'inside' | 'outside';
+  insideGameState?: GameState;
+  outsideGameState?: GameState;
+  insideSeatsCount?: number;
+  outsideSeatsCount?: number;
+  selectedQueueType?: 'main' | 'single' | null;
+  notification?: { message: string; submessage?: string; icon?: string } | null;
   onDeselect: () => void;
   onOpenSettings: () => void;
   onOpenTutorial: () => void;
@@ -80,6 +89,13 @@ interface StationHUDProps {
 
 export const StationHUD: React.FC<StationHUDProps> = ({
   gameState,
+  activeTrack = 'inside',
+  insideGameState = gameState,
+  outsideGameState = 'LOAD_STATE',
+  insideSeatsCount = 0,
+  outsideSeatsCount = 0,
+  selectedQueueType = null,
+  notification = null,
   patience,
   patienceClock,
   patienceNotices,
@@ -110,6 +126,8 @@ export const StationHUD: React.FC<StationHUDProps> = ({
   onAssignToGate,
   onConfirmGrouping,
   onTriggerDispatch,
+  onTriggerDispatchTrack,
+  onSwitchTrack,
   onDeselect,
   onOpenSettings,
   onOpenTutorial,
@@ -137,8 +155,35 @@ export const StationHUD: React.FC<StationHUDProps> = ({
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 md:p-6 select-none font-sans overflow-hidden">
-      {/* --- High-Priority Error Notification Popup --- */}
-      {groupingError && (
+      {/* --- Notification Popup (Unobtrusive Toast for Splits vs Error Modal for Blockers) --- */}
+      {groupingError && groupingError.type === 'split' ? (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-auto max-w-md w-[92%] animate-in fade-in slide-in-from-top-3 duration-200">
+          <div className="bg-neutral-900/95 border border-amber-500/70 rounded-xl px-4 py-2.5 shadow-[0_8px_24px_rgba(245,158,11,0.25)] flex items-center gap-3 backdrop-blur-md">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 text-amber-400">
+              <AlertCircle className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-[11px] font-mono font-bold text-amber-400 uppercase tracking-wider">
+                  {groupingError.title}
+                </h4>
+                {onDismissError && (
+                  <button
+                    onClick={onDismissError}
+                    aria-label="Dismiss notification"
+                    className="text-neutral-400 hover:text-white p-0.5 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-neutral-200 mt-0.5 leading-snug">
+                {groupingError.message}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : groupingError ? (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 pointer-events-auto max-w-lg w-[92%] animate-in fade-in zoom-in-95 duration-150">
           <div className="bg-neutral-950/95 border-2 border-rose-500 rounded-2xl p-4 shadow-[0_0_35px_rgba(244,63,94,0.45)] flex items-start gap-3.5 backdrop-blur-md">
             <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/50 flex items-center justify-center shrink-0 text-rose-400">
@@ -168,7 +213,7 @@ export const StationHUD: React.FC<StationHUDProps> = ({
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* --- TOP BAR: Operations Header & Live Metrics --- */}
       <header className="flex flex-wrap md:flex-nowrap items-start justify-between gap-4 pointer-events-auto">
@@ -397,27 +442,43 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                 </span>
               )}
 
-              {/* Compact Inline Party Indicator: No extra box, zero height growth */}
+              {/* Compact Inline Party Indicator with Highlight Under Active Queue */}
               {selectedGroup && (
-                <div className="flex items-center gap-1.5 bg-neutral-950 border border-sky-500/50 rounded-md px-2 py-0.5 shrink-0 animate-in fade-in duration-150">
-                  <span
-                    className="w-3.5 h-3.5 rounded text-[9px] font-mono font-black text-white flex items-center justify-center border border-white/25 shrink-0"
-                    style={{ backgroundColor: selectedGroup.color }}
-                  >
-                    {selectedGroup.size}
-                  </span>
-                  <span className="text-[11px] font-mono font-bold text-white whitespace-nowrap">
-                    {selectedGroup.type === 'single' ? 'Single Rider' : `Party of ${selectedGroup.size}`}
-                  </span>
-                  <span className={`text-[10px] font-mono font-extrabold px-1.5 py-0.2 rounded border whitespace-nowrap ${
-                    totalAllocated === selectedGroup.size
-                      ? 'bg-emerald-950 text-emerald-300 border-emerald-500/60'
-                      : 'bg-amber-950 text-amber-300 border-amber-500/60'
-                  }`}>
-                    {totalAllocated === selectedGroup.size
-                      ? '✓ Ready'
-                      : `${totalAllocated}/${selectedGroup.size} Placed`}
-                  </span>
+                <div className="relative flex flex-col shrink-0 animate-in fade-in duration-150">
+                  <div className="flex items-center gap-1.5 bg-neutral-950 border border-neutral-700/80 rounded-md px-2 py-0.5 shrink-0">
+                    <span
+                      className="w-3.5 h-3.5 rounded text-[9px] font-mono font-black text-white flex items-center justify-center border border-white/25 shrink-0"
+                      style={{ backgroundColor: selectedGroup.color }}
+                    >
+                      {selectedGroup.size}
+                    </span>
+                    <span className="text-[11px] font-mono font-bold text-white whitespace-nowrap flex items-center gap-1">
+                      <span className={`font-black tracking-wide ${selectedGroup.type === 'main' ? 'text-amber-400' : 'text-cyan-400'}`}>
+                        {selectedGroup.type === 'main' ? 'MAIN QUEUE' : 'SINGLE RIDER'}
+                      </span>
+                      <span className="text-neutral-500">•</span>
+                      <span className="text-neutral-300">
+                        {selectedGroup.type === 'single' ? 'Solo Rider' : `Party of ${selectedGroup.size}`}
+                      </span>
+                    </span>
+                    <span className={`text-[10px] font-mono font-extrabold px-1.5 py-0.2 rounded border whitespace-nowrap ${
+                      totalAllocated === selectedGroup.size
+                        ? 'bg-emerald-950 text-emerald-300 border-emerald-500/60'
+                        : 'bg-amber-950 text-amber-300 border-amber-500/60'
+                    }`}>
+                      {totalAllocated === selectedGroup.size
+                        ? '✓ Ready'
+                        : `${totalAllocated}/${selectedGroup.size} Placed`}
+                    </span>
+                  </div>
+                  {/* Highlight under the active queue */}
+                  <div
+                    className={`h-[3px] w-full rounded-full mt-0.5 animate-pulse ${
+                      selectedGroup.type === 'main'
+                        ? 'bg-gradient-to-r from-amber-500 via-orange-400 to-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.9)]'
+                        : 'bg-gradient-to-r from-cyan-400 via-sky-300 to-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.9)]'
+                    }`}
+                  />
                 </div>
               )}
             </div>
@@ -443,11 +504,17 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                       onConfirmGrouping?.();
                     }}
                     className={`px-3 py-1 rounded-lg text-[11px] font-mono font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      totalAllocated === selectedGroup.size
+                      totalAllocated >= selectedGroup.size
                         ? 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.4)]'
-                        : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400 border border-neutral-700'
+                        : totalAllocated > 0
+                        ? 'bg-amber-600 hover:bg-amber-500 text-white border border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
+                        : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400 border border-neutral-700 opacity-60'
                     }`}
-                    title="Confirm gate assignments and let group board [Right Click / Enter]"
+                    title={
+                      totalAllocated > 0 && totalAllocated < selectedGroup.size
+                        ? "Let partial group board (splits group) [Right Click / Enter]"
+                        : "Confirm gate assignments and let group board [Right Click / Enter]"
+                    }
                   >
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>LET GROUP GO [R-CLICK]</span>
@@ -539,10 +606,15 @@ export const StationHUD: React.FC<StationHUDProps> = ({
           </div>
 
           {/* 4 Vehicles containing 8 Gates Matrix */}
-          {selectedGroup && groupSplitPreview && groupSplitPreview.unnecessaryKarts > 0 && totalAllocated === selectedGroup.size && (
+          {selectedGroup && groupSplitPreview && groupSplitPreview.unnecessaryKarts > 0 && (
             <div className="mb-2 rounded-lg border border-amber-400/70 bg-amber-950/80 px-3 py-2 text-[11px] font-mono text-amber-200 shadow-[0_0_14px_rgba(251,191,36,0.18)]">
               This group could fit in {groupSplitPreview.minimumFeasibleKartCount} kart{groupSplitPreview.minimumFeasibleKartCount === 1 ? '' : 's'}. You’re using {groupSplitPreview.actualKartCount}.
               {groupSplitPreview.alternativeKartIndices.length > 0 && <span className="ml-2 text-emerald-300">Outlined karts have room.</span>}
+            </div>
+          )}
+          {selectedGroup && totalAllocated > 0 && totalAllocated < selectedGroup.size && (
+            <div className="mb-2 rounded-lg border border-amber-400/70 bg-amber-950/80 px-3 py-2 text-[11px] font-mono text-amber-200 shadow-[0_0_14px_rgba(251,191,36,0.18)]">
+              Partial group selection: Seating {totalAllocated} of {selectedGroup.size} guests. Confirming will split this group ({selectedGroup.size - totalAllocated} remaining in queue).
             </div>
           )}
           <div className="grid grid-cols-4 gap-2.5">
@@ -615,9 +687,12 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                           {pendingA > 0 ? `+${pendingA}` : 'SEL'}
                         </span>
                       )}
-                      {/* Underline indication: only appears if currently hovered */}
+                      {/* White Underline & Small White Triangle Hover Indicator */}
                       {isHoveredA && (
-                        <div className="absolute -bottom-1 left-1.5 right-1.5 h-1 bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.95)]" />
+                        <div className="absolute -bottom-2.5 left-0 right-0 flex flex-col items-center pointer-events-none z-20">
+                          <div className="w-[85%] h-1 bg-white rounded-full shadow-[0_0_8px_rgba(255,255,255,0.95)]" />
+                          <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[5px] border-t-white mt-[1px] drop-shadow-[0_0_4px_rgba(255,255,255,0.9)]" />
+                        </div>
                       )}
                       <div className="flex items-center justify-between w-full px-0.5">
                         <span className="text-[10px] font-mono font-bold">G{gateIdxA + 1}</span>
@@ -680,9 +755,12 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                           {pendingB > 0 ? `+${pendingB}` : 'SEL'}
                         </span>
                       )}
-                      {/* Underline indication: only appears if currently hovered */}
+                      {/* White Underline & Small White Triangle Hover Indicator */}
                       {isHoveredB && (
-                        <div className="absolute -bottom-1 left-1.5 right-1.5 h-1 bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.95)]" />
+                        <div className="absolute -bottom-2.5 left-0 right-0 flex flex-col items-center pointer-events-none z-20">
+                          <div className="w-[85%] h-1 bg-white rounded-full shadow-[0_0_8px_rgba(255,255,255,0.95)]" />
+                          <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[5px] border-t-white mt-[1px] drop-shadow-[0_0_4px_rgba(255,255,255,0.9)]" />
+                        </div>
                       )}
                       <div className="flex items-center justify-between w-full px-0.5">
                         <span className="text-[10px] font-mono font-bold">G{gateIdxB + 1}</span>

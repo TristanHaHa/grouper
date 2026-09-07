@@ -6,6 +6,8 @@ export type GameState = 'TITLE' | 'LOAD_STATE' | 'READY_STATE' | 'DISPATCH_STATE
 
 export type QueueType = 'main' | 'single';
 
+export type TrackType = 'inside' | 'outside';
+
 export type GroupStatus = 'Waiting' | 'Targeted' | 'Assigned' | 'Boarding' | 'Boarded' | 'Dispatched';
 
 export interface NPCData {
@@ -53,6 +55,8 @@ export interface VehicleState {
 export interface SimulationStats {
   score: number;
   trainsDispatched: number;
+  insideTrainsDispatched?: number;
+  outsideTrainsDispatched?: number;
   perfectTrains: number;
   guestsProcessed: number;
   totalSeatsFilled: number;
@@ -62,6 +66,9 @@ export interface SimulationStats {
   bestStreak: number;
   timeElapsed: number;
   shiftRating: 'ROOKIE' | 'OPERATOR' | 'SPECIALIST' | 'MASTER GROUPER' | 'LEGEND';
+  groupsDeparted?: number;
+  guestsPerMinute?: number;
+  avgDispatchIntervalSeconds?: number;
 }
 
 export interface DifficultyConfig {
@@ -75,7 +82,8 @@ export interface DifficultyConfig {
 }
 
 export interface InteractionTarget {
-  type: 'main_queue' | 'single_queue' | 'gate' | 'dispatch_button' | 'console' | 'none';
+  type: 'main_queue' | 'single_queue' | 'gate' | 'dispatch_button' | 'dispatch_button_inside' | 'dispatch_button_outside' | 'console' | 'none';
+  track?: TrackType;
   index?: number; // for gates 0-7
   label: string;
   description: string;
@@ -95,6 +103,7 @@ export interface KeybindsConfig {
   pause: string;
   callMainQueue: string;
   callSingleQueue: string;
+  switchTrack: string;
   gate1: string;
   gate2: string;
   gate3: string;
@@ -118,6 +127,7 @@ export const DEFAULT_KEYBINDS: KeybindsConfig = {
   pause: 'KeyP',
   callMainQueue: 'KeyM',
   callSingleQueue: 'KeyN',
+  switchTrack: 'KeyT',
   gate1: 'Digit1',
   gate2: 'Digit2',
   gate3: 'Digit3',

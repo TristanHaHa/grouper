@@ -449,6 +449,28 @@ class SoundEngine {
     osc.stop(now + 0.04);
   }
 
+  // Soft unobtrusive notification chime (e.g. for group split notices)
+  public playNotice() {
+    if (this.muted || !this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+
+    [587.33, 523.25].forEach((freq, idx) => {
+      if (!this.ctx || !this.sfxGain) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.09);
+
+      gain.gain.setValueAtTime(0.18, now + idx * 0.09);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.09 + 0.2);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now + idx * 0.09);
+      osc.stop(now + idx * 0.09 + 0.2);
+    });
+  }
+
   // Group Confirmation & Send to Gates
   public playGroupConfirm() {
     if (this.muted || !this.ctx || !this.sfxGain) return;

@@ -1,4 +1,4 @@
-export type ControllerAction = 'previousGate' | 'nextGate' | 'selectGate' | 'confirmGroup' | 'mainQueue' | 'singleQueue'
+export type ControllerAction = 'previousGate' | 'nextGate' | 'selectGate' | 'confirmGroup' | 'mainQueue' | 'singleQueue' | 'switchTrack'
   | 'cancel' | 'interact' | 'jump' | 'pause' | 'menuUp' | 'menuDown' | 'menuLeft' | 'menuRight' | 'menuConfirm' | 'menuBack';
 export type ControllerMode = 'gameplay' | 'menu';
 export type ControllerFamily = 'xbox' | 'playstation';
@@ -7,8 +7,8 @@ export const neutralControllerAxes = (): ControllerAxes => ({ moveX: 0, moveY: 0
 
 export function controllerLabels(family: ControllerFamily) {
   return family === 'playstation'
-    ? { previous: 'L1', next: 'R1', select: 'Square', confirm: 'L2', accept: 'Cross', back: 'Circle', interact: 'R2', jump: 'Cross', pause: 'Options' }
-    : { previous: 'LB', next: 'RB', select: 'X', confirm: 'LT', accept: 'A', back: 'B', interact: 'RT', jump: 'A', pause: 'Menu' };
+    ? { previous: 'L1', next: 'R1', select: 'Square', confirm: 'L2', accept: 'Cross', back: 'Circle', interact: 'R2', jump: 'Cross', pause: 'Options', switchTrack: 'Triangle' }
+    : { previous: 'LB', next: 'RB', select: 'X', confirm: 'LT', accept: 'A', back: 'B', interact: 'RT', jump: 'A', pause: 'Menu', switchTrack: 'Y' };
 }
 
 export function stickWithDeadzone(x: number, y: number, deadzone: number): [number, number] {
@@ -55,6 +55,7 @@ export class ControllerInput {
     const actions: ControllerAction[] = [];
     const bindings: [number, ControllerAction, boolean][] = mode === 'gameplay'
       ? [[4, 'previousGate', true], [5, 'nextGate', true], [2, 'selectGate', false], [6, 'confirmGroup', false],
+        [3, 'switchTrack', false],
         [12, 'mainQueue', false], [13, 'singleQueue', false], [1, 'cancel', false], [7, 'interact', false],
         [0, 'jump', false], [9, 'pause', false]]
       : [[12, 'menuUp', true], [13, 'menuDown', true], [14, 'menuLeft', true], [15, 'menuRight', true],
