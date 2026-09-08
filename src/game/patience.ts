@@ -50,3 +50,17 @@ export function dispatchRewards(gates: GateState[], maxReward: number) {
     doubleGroupScore: gates.filter(gate => gate.occupants.length === 4).length * 100,
   };
 }
+
+export const SPLIT_TRAIN_PATIENCE_PENALTY = 4;
+
+/** Only front-row riders board this train. A partial party is charged once for the entire shift. */
+export function groupsSplitAcrossTrains(gates: GateState[], alreadyPenalized: ReadonlySet<string>): string[] {
+  const groups = new Map<string, { members: Set<string>; size: number }>();
+  for (const gate of gates) for (const npc of gate.occupants.slice(0, 2)) {
+    if (npc.sourceQueue !== 'main' || npc.sourceGroupSize <= 1) continue;
+    const party = groups.get(npc.groupId) ?? { members: new Set<string>(), size: npc.sourceGroupSize };
+    party.members.add(npc.id);
+    groups.set(npc.groupId, party);
+  }
+  return [...groups].filter(([id, party]) => party.members.size < party.size && !alreadyPenalized.has(id)).map(([id]) => id);
+}

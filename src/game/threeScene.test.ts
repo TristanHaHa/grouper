@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { getEventListeners } from 'node:events';
 import { test } from 'node:test';
+import { TrackScope } from './trackState';
 import { RideStation3D } from './threeScene';
 import * as THREE from 'three';
 import { soundEngine } from '../audio/soundEngine';
@@ -28,6 +29,7 @@ test('gate clicks use only the current scene after a StrictMode remount', (t) =>
   const mountScene = () => {
     const scene = Object.assign(Object.create(RideStation3D.prototype), {
       container,
+      trackScope: new TrackScope(), activeTrack: 'inside', currentHoverTarget: { type: 'none' },
       eventListenerController: new AbortController(),
       animationFrameId: null,
       renderer: { dispose() {}, domElement: { parentElement: null } },
@@ -86,6 +88,7 @@ function animationFixture() {
   world.add(rider);
   const phases: string[] = [];
   return Object.assign(Object.create(RideStation3D.prototype), {
+    trackScope: new TrackScope(), activeTrack: 'inside',
     scene: world, trainGroup: train, activeTrain: { group: train, vehicleMeshes: [], lapBarGroups: [] }, isPaused: false,
     guestReactions: { reset() {}, forget() {} },
     dispatchSequence: null, resetAnimation: null, trainSpeedZ: 0, lapBarAngle: 0,
@@ -154,7 +157,7 @@ test('pausing freezes departure and restarting cancels pending animations', (t) 
   assert.equal(finished, false);
 });
 
-test('next-train arrival advances staged riders and can be cancelled by restart', (t) => {
+test('dispatch immediately promotes staged riders and restart cancels train arrival', (t) => {
   t.mock.method(soundEngine, 'playTrainBrakes', () => {});
   const scene = animationFixture();
   scene.walkingNPCs = [];
@@ -174,6 +177,9 @@ test('next-train arrival advances staged riders and can be cancelled by restart'
   scene.npcMeshes.set('staged', stagedMesh);
   scene.gatesState[0].occupants.push({ id: 'second' }, { id: 'staged' });
   scene.npcMeshes.get('rider').userData.isRider = true;
+  scene.activeTrain.group.attach(scene.npcMeshes.get('rider'));
+  scene.updateGates = (gates: any[]) => { scene.gatesState = gates; };
+  scene.releaseBoardingRow(scene.gatesState.map((gate: any) => ({ ...gate, occupants: gate.occupants.slice(2) })));
   let arrivals = 0;
   scene.triggerResetAnimation(() => { arrivals++; });
   assert.equal(scene.npcMeshes.has('rider'), false, 'departed rider is removed');
@@ -214,10 +220,66 @@ test('walkouts animate the whole group once and clean up only after reaching the
   for (const walker of scene.walkingNPCs) {
     assert.equal(walker.npc.isWalking, true);
     assert.equal(walker.mesh.userData.isDeparting, true);
-    assert.equal(walker.waypoints.at(-1).z, 12);
+    assert.equal(walker.waypoints.at(-1).z, 16);
     walker.onComplete();
     assert.equal(walker.mesh.parent, null);
   }
   assert.equal(scene.npcMeshes.size, 0);
   assert.deepEqual(forgotten, ['a', 'b']);
+});
+
+test('both trains dispatch independently and returning one cannot remove the other riders', t => {
+  t.mock.method(soundEngine, 'playDispatchButton', () => {});
+  t.mock.method(soundEngine, 'playLapBarsLock', () => {});
+  t.mock.method(soundEngine, 'playCoasterLaunch', () => {});
+  const scene = animationFixture();
+  const outside = new THREE.Group(); scene.scene.add(outside);
+  const rider = new THREE.Group(); scene.scene.add(rider); scene.npcMeshes.set('outside-rider', rider);
+  let insideDone = 0, outsideDone = 0;
+  scene.withTrack('outside', () => {
+    scene.trainGroup = outside; scene.activeTrain = { group: outside, vehicleMeshes: [], lapBarGroups: [] };
+    scene.gatesState = [{ occupants: [{ id: 'outside-rider', height: 1 }] }];
+    scene.triggerDispatchAnimation(() => { outsideDone++; });
+  });
+  scene.triggerDispatchAnimation(() => { insideDone++; });
+  scene.updateDispatchAnimation(2.6);
+  scene.withTrack('outside', () => scene.updateDispatchAnimation(2.6));
+  assert.equal(rider.parent, outside);
+  assert.ok(rider.position.x > 0, 'outside rider sits on the positive-X track');
+  assert.ok(scene.npcMeshes.get('rider').position.x < 0);
+  scene.updateDispatchAnimation(4.2);
+  assert.equal(insideDone, 1); assert.equal(outsideDone, 0);
+  scene.withTrack('outside', () => scene.updateDispatchAnimation(4.2));
+  assert.equal(outsideDone, 1);
+  scene.waitingTrainQueue = [{ group: new THREE.Group(), vehicleMeshes: [], lapBarGroups: [] }];
+  scene.createTrainInstance = () => ({ group: new THREE.Group(), vehicleMeshes: [], lapBarGroups: [] });
+  scene.trainColorPalette = ['#ffffff']; scene.trainColorCounter = 0;
+  scene.triggerResetAnimation(() => {});
+  assert.equal(scene.npcMeshes.has('outside-rider'), true);
+  assert.equal(rider.parent, outside, 'inside reset leaves the outside train intact');
+  scene.resetRide();
+  for (const track of ['inside', 'outside']) scene.withTrack(track, () => {
+    assert.equal(scene.dispatchSequence, null); assert.equal(scene.resetAnimation, null);
+  });
+});
+
+test('large parties fit their own queue lanes and single riders have only one shared mesh', async () => {
+  const { generateGroup } = await import('./npcGenerator');
+  const scene = animationFixture();
+  scene.npcMeshes.clear(); scene.guestReactions.register = () => {};
+  const inside = generateGroup('main', 16), outside = generateGroup('main', 16), single = generateGroup('single', 1);
+  scene.syncQueues([inside], [single]);
+  scene.withTrack('outside', () => scene.syncQueues([outside], [single]));
+  assert.equal(scene.npcMeshes.size, 33);
+  for (const [group, center] of [[inside, -3.7], [outside, 3.7]] as const) {
+    const positions = group.members.map(npc => scene.npcMeshes.get(npc.id).position);
+    assert.ok(positions.every(p => Math.abs(p.x - center) <= 0.76));
+    assert.equal(new Set(positions.map(p => p.z)).size, 4, 'sixteen guests stand in four rows');
+  }
+  const assignments = [{ npc: single.members[0], gateIndex: 0, seatSlot: 0 }];
+  scene.withTrack('outside', () => scene.walkGroupToGates(single, assignments));
+  const walker = scene.walkingNPCs.at(-1);
+  assert.equal(walker.waypoints.at(-1).x, 7.8);
+  walker.onComplete();
+  assert.equal(walker.mesh.rotation.y, Math.PI / 2);
 });

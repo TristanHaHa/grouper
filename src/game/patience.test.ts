@@ -59,3 +59,22 @@ test('partial staging rewards actual riders and empty gates earn nothing', () =>
     boarding: 0, patience: 0, stagedPatience: 0, doubleGroupScore: 0,
   });
 });
+
+test('splitting a party across trains costs once, while multiple gates on one train are fine', async () => {
+  const { groupsSplitAcrossTrains, SPLIT_TRAIN_PATIENCE_PENALTY } = await import('./patience');
+  const { generateGroup } = await import('./npcGenerator');
+  const group = generateGroup('main', 4);
+  const gate = (occupants: typeof group.members) => ({ index: 0, occupants, capacity: 4, status: 'full' as const, vehicleIndex: 0 });
+  const seen = new Set<string>();
+  assert.deepEqual(groupsSplitAcrossTrains([gate(group.members.slice(0, 2)), gate(group.members.slice(2))], seen), []);
+  const first = groupsSplitAcrossTrains([gate(group.members)], seen);
+  assert.deepEqual(first, [group.id], 'staged riders are on the next train');
+  assert.equal(first.length * SPLIT_TRAIN_PATIENCE_PENALTY, 4);
+  first.forEach(id => seen.add(id));
+  assert.deepEqual(groupsSplitAcrossTrains([gate(group.members.slice(2))], seen), [], 'the other track or later train cannot charge again');
+  const solo = generateGroup('single', 1);
+  assert.deepEqual(groupsSplitAcrossTrains([gate(solo.members)], new Set()), []);
+  assert.deepEqual(groupsSplitAcrossTrains([], new Set()), []);
+  seen.clear();
+  assert.deepEqual(groupsSplitAcrossTrains([gate(group.members)], seen), [group.id], 'a new shift resets accounting');
+});

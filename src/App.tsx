@@ -10,9 +10,10 @@ import { soundEngine } from './audio/soundEngine';
 import { DIFFICULTY_PRESETS, GATE_COUNT } from './game/constants';
 import { createInitialQueues, generateGroup } from './game/npcGenerator';
 import { RideStation3D } from './game/threeScene';
+import { TRACKS, TrackScope, useTrackField } from './game/trackState';
 import { ControllerInput } from './game/controller';
 import { activeControllerMenu, navigateControllerMenu } from './utils/controllerMenu';
-import { advancePatience, completedDoubleGates, dispatchRewards, initialPatienceClock, PatienceNotice } from './game/patience';
+import { advancePatience, completedDoubleGates, dispatchRewards, groupsSplitAcrossTrains, SPLIT_TRAIN_PATIENCE_PENALTY, initialPatienceClock, PatienceNotice } from './game/patience';
 import { advanceQueuePressure, balancedService, initialQueuePressure, initialServiceTargets, observeServiceTargets, QUEUE_NAMES, queueExtraDrain, queueServiceBonus } from './game/queueService';
 import { analyzeGroupSplit } from './game/groupSplit';
 import { GameOverModal } from './components/GameOverModal';
@@ -28,6 +29,7 @@ import {
   InteractionTarget,
   NPCData,
   SimulationStats,
+  TrackType,
 } from './types';
 
 export default function App() {
@@ -36,8 +38,15 @@ export default function App() {
   const controllerRef = useRef(new ControllerInput());
   const [controllerFamily, setControllerFamily] = useState<'xbox' | 'playstation' | null>(null);
 
+  const [scope] = useState(() => new TrackScope());
+  const [activeTrack, setActiveTrack] = useState<TrackType>('inside');
+  const [sessionOver, setSessionOver] = useState(false);
+  const sessionOverRef = useRef(false);
+  const runTrack = <T,>(track: TrackType, action: () => T): T =>
+    scope.run(track, () => sceneRef.current ? sceneRef.current.withTrack(track, action) : action());
+
   // Core Simulation State
-  const [gameState, setGameState] = useState<GameState>('LOAD_STATE');
+  const [gameState, setGameState, gameStateRef, gameStateByTrack] = useTrackField<GameState>(scope, () => ('LOAD_STATE'));
   const [difficulty, setDifficulty] = useState<DifficultyConfig>(DIFFICULTY_PRESETS.STANDARD);
   const [patience, setPatience] = useState<number>(100);
   const [patienceClock, setPatienceClock] = useState(initialPatienceClock);
@@ -47,23 +56,25 @@ export default function App() {
   const patienceLossFlashTimerRef = useRef<NodeJS.Timeout | null>(null);
   const noticeIdRef = useRef(0);
   const departureInProgressRef = useRef(false);
-  const [queuePressure, setQueuePressure] = useState(initialQueuePressure);
-  const queuePressureRef = useRef(queuePressure);
-  const [serviceTargets, setServiceTargets] = useState(initialServiceTargets);
-  const serviceTargetsRef = useRef(serviceTargets);
-  const [dispatchProgress, setDispatchProgress] = useState<{ label: string; seconds: number } | null>(null);
+  const splitTrainGroupsRef = useRef(new Set<string>());
+  const [queuePressure, setQueuePressure, queuePressureRef, queuePressureByTrack] = useTrackField<ReturnType<typeof initialQueuePressure>>(scope, () => (initialQueuePressure()));
+  const [serviceTargets, setServiceTargets, serviceTargetsRef, serviceTargetsByTrack] = useTrackField<ReturnType<typeof initialServiceTargets>>(scope, () => (initialServiceTargets()));
+  const [dispatchProgress, setDispatchProgress, dispatchProgressRef, dispatchProgressByTrack] = useTrackField<{ label: string; seconds: number } | null>(scope, () => (null));
   const [selectedGroup, setSelectedGroup] = useState<GroupData | null>(null);
-  const [pendingAllocations, setPendingAllocations] = useState<{ [gateIndex: number]: number }>({});
+  const selectedGroupRef = useRef<GroupData | null>(null);
+  selectedGroupRef.current = selectedGroup;
+  const selectedQueueSourceRef = useRef<TrackType | 'single'>('inside');
+  const [pendingAllocations, setPendingAllocations, pendingAllocationsRef, pendingAllocationsByTrack] = useTrackField<{ [gateIndex: number]: number }>(scope, () => ({}));
   const [splitPenaltyKartIndices, setSplitPenaltyKartIndices] = useState<number[]>([]);
   const splitPenaltyTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isPaused, setIsPaused] = useState<boolean>(false);
 
   // Queues State
-  const [mainQueue, setMainQueue] = useState<GroupData[]>([]);
+  const [mainQueue, setMainQueue, mainQueueRef, mainQueueByTrack] = useTrackField<GroupData[]>(scope, () => ([]));
   const [singleQueue, setSingleQueue] = useState<GroupData[]>([]);
 
   // 8 Gates State
-  const [gates, setGates] = useState<GateState[]>(() =>
+  const [gates, setGates, gatesRef, gatesByTrack] = useTrackField<GateState[]>(scope, () =>
     Array.from({ length: GATE_COUNT }, (_, i) => ({
       index: i,
       occupants: [],
@@ -85,6 +96,11 @@ export default function App() {
     currentStreak: 0,
     bestStreak: 0,
     timeElapsed: 0,
+    groupsDeparted: 0,
+    guestsPerMinute: 0,
+    avgDispatchIntervalSeconds: 0,
+    insideTrainsDispatched: 0,
+    outsideTrainsDispatched: 0,
     shiftRating: 'ROOKIE',
   });
   const statsRef = useRef(stats);
@@ -121,9 +137,7 @@ export default function App() {
   const lastCycleTimeRef = useRef<number>(0);
   const lastClickToggleTimeRef = useRef<number>(0);
   const lastPointerSideButtonTimeRef = useRef<number>(0);
-  const [hoveredGateIndex, setHoveredGateIndex] = useState<number | null>(null);
-  const hoveredGateIndexRef = useRef<number | null>(null);
-  hoveredGateIndexRef.current = hoveredGateIndex;
+  const [hoveredGateIndex, setHoveredGateIndex, hoveredGateIndexRef, hoveredGateIndexByTrack] = useTrackField<number | null>(scope, () => (null));
   // Aliases for compatibility
   const focusedGateIndex = hoveredGateIndex;
   const setFocusedGateIndex = setHoveredGateIndex;
@@ -136,6 +150,18 @@ export default function App() {
     type?: string;
   } | null>(null);
   const errorTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [queueNotification, setQueueNotification] = useState<{ message: string; submessage?: string; icon?: string } | null>(null);
+  const queueNotificationTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const announceQueueSwitch = (queue: 'main' | 'single') => {
+    if (queueNotificationTimerRef.current) clearTimeout(queueNotificationTimerRef.current);
+    setQueueNotification({
+      icon: queue === 'main' ? '👥' : '🎫',
+      message: queue === 'main' ? `${scope.current === 'inside' ? 'Inside' : 'Outside'} group queue selected` : 'Shared single-rider queue selected',
+      submessage: 'Gate choices and hover preserved',
+    });
+    queueNotificationTimerRef.current = setTimeout(() => setQueueNotification(null), 1800);
+  };
 
   const triggerGroupingError = (
     title: string = 'INVALID SELECTION',
@@ -168,14 +194,10 @@ export default function App() {
   };
 
   // Selected Gate Indices during active Grouping Stage
-  const [selectedGateIndices, setSelectedGateIndices] = useState<number[]>([]);
-  const selectedGateIndicesRef = useRef<number[]>([]);
-  selectedGateIndicesRef.current = selectedGateIndices;
+  const [selectedGateIndices, setSelectedGateIndices, selectedGateIndicesRef, selectedGateIndicesByTrack] = useTrackField<number[]>(scope, () => ([]));
 
   // Active Kart Set Selection (0 = Karts 1-2 / Gates 1-4; 1 = Karts 3-4 / Gates 5-8)
-  const [activeKartBank, setActiveKartBank] = useState<0 | 1>(0);
-  const activeKartBankRef = useRef<0 | 1>(0);
-  activeKartBankRef.current = activeKartBank;
+  const [activeKartBank, setActiveKartBank, activeKartBankRef, activeKartBankByTrack] = useTrackField<0 | 1>(scope, () => (0));
 
   const handleSwitchKartBank = (newBank: 0 | 1) => {
     if (activeKartBankRef.current === newBank) return;
@@ -187,9 +209,19 @@ export default function App() {
     }
   };
 
+  const selectTrack = (next: TrackType) => {
+    if (isPausedRef.current || sessionOverRef.current) return;
+    scope.current = next;
+    setActiveTrack(next);
+    sceneRef.current?.setActiveTrack(next);
+    setPendingAllocations(selectedGroupRef.current ? getPendingAllocations(selectedGroupRef.current, selectedGateIndicesRef.current) : {});
+    sceneRef.current?.setSelectedGroup(selectedGroupRef.current);
+    sceneRef.current?.setPendingGateAllocations(pendingAllocationsRef.current, selectedGateIndicesRef.current);
+    sceneRef.current?.setHoveredGate(hoveredGateIndexRef.current);
+  };
+  const handleSwitchTrack = () => selectTrack(scope.current === 'inside' ? 'outside' : 'inside');
+
   // Reference hooks for state to avoid stale closures
-  const mainQueueRef = useRef(mainQueue);
-  mainQueueRef.current = mainQueue;
 
   const singleQueueRef = useRef(singleQueue);
   singleQueueRef.current = singleQueue;
@@ -197,8 +229,6 @@ export default function App() {
   const patienceRef = useRef(patience);
   patienceRef.current = patience;
 
-  const gameStateRef = useRef(gameState);
-  gameStateRef.current = gameState;
 
   const isPausedRef = useRef(isPaused);
   isPausedRef.current = isPaused;
@@ -209,14 +239,8 @@ export default function App() {
   const difficultyRef = useRef(difficulty);
   difficultyRef.current = difficulty;
 
-  const selectedGroupRef = useRef(selectedGroup);
-  selectedGroupRef.current = selectedGroup;
 
-  const pendingAllocationsRef = useRef(pendingAllocations);
-  pendingAllocationsRef.current = pendingAllocations;
 
-  const gatesRef = useRef(gates);
-  gatesRef.current = gates;
 
   const updatePatience = (value: number) => {
     patienceRef.current = value;
@@ -247,19 +271,39 @@ export default function App() {
     setPatienceNotices(previous => [...previous.slice(-11), notice]);
   };
 
+  const singlePressureRef = useRef(initialQueuePressure().single);
   const resetPatienceClock = () => {
     const clock = initialPatienceClock();
     patienceClockRef.current = clock;
     setPatienceClock(clock);
     setPatienceNotices([]);
+    singlePressureRef.current = initialQueuePressure().single;
+    for (const track of TRACKS) runTrack(track, () => {
     const pressure = advanceQueuePressure(initialQueuePressure(), mainQueueRef.current, singleQueueRef.current, 0);
     queuePressureRef.current = pressure;
     setQueuePressure(pressure);
     sceneRef.current?.setQueuePressure(pressure);
+    });
   };
 
-  const syncQueueService = (seconds = 0, newTrain = false) => {
-    const pressure = advanceQueuePressure(queuePressureRef.current, mainQueueRef.current, singleQueueRef.current, seconds);
+  const refreshSharedSelection = () => {
+    if (!selectedGroupRef.current) return;
+    const source = selectedQueueSourceRef.current;
+    const queue = source === 'single' ? singleQueueRef.current : mainQueueByTrack[source];
+    if (selectedGroupRef.current === queue[0]) return;
+    const next = queue[0] ?? null;
+    runTrack(sceneRef.current?.activeTrack ?? scope.current, () => {
+      selectedGroupRef.current = next;
+      setSelectedGroup(next);
+      setPendingAllocations(next ? getPendingAllocations(next, selectedGateIndicesRef.current) : {});
+      sceneRef.current?.setSelectedGroup(next);
+      sceneRef.current?.setPendingGateAllocations(pendingAllocationsRef.current, selectedGateIndicesRef.current);
+    });
+  };
+
+  const syncQueueService = (seconds = 0, newTrain = false, singleSeconds = seconds) => {
+    singlePressureRef.current = advanceQueuePressure({ main: initialQueuePressure().main, single: singlePressureRef.current }, [], singleQueueRef.current, singleSeconds).single;
+    const pressure = { ...advanceQueuePressure(queuePressureRef.current, mainQueueRef.current, singleQueueRef.current, seconds), single: singlePressureRef.current };
     queuePressureRef.current = pressure;
     setQueuePressure(pressure);
     sceneRef.current?.setQueuePressure(pressure);
@@ -267,9 +311,11 @@ export default function App() {
       mainQueueRef.current, singleQueueRef.current, gatesRef.current);
     serviceTargetsRef.current = targets;
     setServiceTargets(targets);
+    refreshSharedSelection();
   };
 
   const handleTogglePause = () => {
+    if (sessionOverRef.current) return;
     setIsPaused((prev) => {
       const next = !prev;
       isPausedRef.current = next;
@@ -290,6 +336,10 @@ export default function App() {
     setSingleQueue(initialSingle);
     mainQueueRef.current = initialMain;
     singleQueueRef.current = initialSingle;
+    runTrack('outside', () => {
+      setMainQueue(createInitialQueues(settingsRef.current.groupRandomness ?? 0).mainQueue);
+      syncQueueService(0, true);
+    });
     syncQueueService(0, true);
 
     // Initialize 3D Scene
@@ -297,8 +347,8 @@ export default function App() {
       onTargetChange: (newTarget) => {
         setTarget(newTarget);
       },
-      onSelectMainQueue: () => {
-        handleSelectMainQueue();
+      onSelectMainQueue: (track) => {
+        handleSelectMainQueue(track);
       },
       onSelectSingleQueue: () => {
         handleSelectSingleQueue();
@@ -321,6 +371,9 @@ export default function App() {
       onSwitchKartBank: (bank) => {
         handleSwitchKartBank(bank);
       },
+      onSwitchTrack: () => handleSwitchTrack(),
+      onSelectTrack: track => selectTrack(track),
+      onTriggerDispatchTrack: (track) => runTrack(track, () => handleTriggerDispatch()),
       onCycleGate: (direction) => {
         handleCycleGate(direction);
       },
@@ -330,10 +383,10 @@ export default function App() {
       onGateHover: (gateIndex) => {
         handleHoverGate(gateIndex, false);
       },
-      onDispatchProgress: (label, seconds) => setDispatchProgress({ label, seconds }),
-      onGuestReactionEvent: (event) => {
+      onDispatchProgress: (label, seconds, track) => runTrack(track, () => setDispatchProgress({ label, seconds })),
+      onGuestReactionEvent: (event) => runTrack(event.track ?? scope.current, () => {
         if (event.type !== 'departure' || settingsRef.current.zenMode || isPausedRef.current
-          || !['LOAD_STATE', 'READY_STATE'].includes(gameStateRef.current)) return;
+) return;
         const queue = event.queue === 'main' ? mainQueueRef.current : singleQueueRef.current;
         const group = queue[0];
         if (!group || group.id !== event.groupId || group.members[0]?.id !== event.leaderId
@@ -349,25 +402,13 @@ export default function App() {
           singleQueueRef.current = remaining;
           setSingleQueue(remaining);
         }
-        if (selectedGroupRef.current?.id === event.groupId) {
-          setSelectedGroup(null);
-          selectedGroupRef.current = null;
-          setSelectedGateIndices([]);
-          selectedGateIndicesRef.current = [];
-          setPendingAllocations({});
-          pendingAllocationsRef.current = {};
-          setHoveredGateIndex(null);
-          hoveredGateIndexRef.current = null;
-          sceneRef.current?.setSelectedGroup(null);
-          sceneRef.current?.setPendingGateAllocations({}, []);
-          sceneRef.current?.setHoveredGate(null);
-        }
         sceneRef.current?.removeDepartedGroup(event.groupId);
         sceneRef.current?.syncQueues(mainQueueRef.current, singleQueueRef.current);
         syncQueueService();
         // One fixed penalty per group, regardless of its size.
         applyPatiencePenalty(4, `${QUEUE_NAMES[event.queue]} group left`);
-      },
+        setStats(previous => ({ ...previous, groupsDeparted: (previous.groupsDeparted ?? 0) + 1 }));
+      }),
     });
 
     sceneRef.current = scene;
@@ -377,6 +418,11 @@ export default function App() {
     scene.setBrightness(settingsRef.current.brightness);
     scene.syncQueues(initialMain, initialSingle);
     scene.updateGates(gatesRef.current);
+    runTrack('outside', () => {
+      scene.syncQueues(mainQueueRef.current, singleQueueRef.current);
+      scene.updateGates(gatesRef.current);
+      scene.setQueuePressure(queuePressureRef.current);
+    });
 
     // Begin with the front Main Queue group ready for gate assignment.
     const initialMainGroup = initialMain[0];
@@ -398,6 +444,23 @@ export default function App() {
       clearInterval(pointerInterval);
       scene.dispose();
     };
+  }, []);
+
+  // Shift metrics are based on playable station time only.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (isPausedRef.current || sessionOverRef.current) return;
+      setStats(previous => {
+        const timeElapsed = previous.timeElapsed + 1;
+        return {
+          ...previous,
+          timeElapsed,
+          guestsPerMinute: timeElapsed ? Math.round((previous.guestsProcessed / (timeElapsed / 60)) * 10) / 10 : 0,
+          avgDispatchIntervalSeconds: previous.trainsDispatched ? Math.round(timeElapsed / previous.trainsDispatched) : 0,
+        };
+      });
+    }, 1000);
+    return () => clearInterval(timer);
   }, []);
 
   // --- Global Keyboard and Mouse Action Listeners ---
@@ -430,7 +493,7 @@ export default function App() {
         return;
       }
 
-      if (isPausedRef.current || gameStateRef.current === 'PAUSED' || gameStateRef.current === 'GAME_OVER') {
+      if (isPausedRef.current || gameStateRef.current === 'PAUSED' || sessionOverRef.current) {
         return;
       }
 
@@ -541,6 +604,8 @@ export default function App() {
         sceneRef.current?.handleInteraction();
         return;
       }
+
+      if (e.code === 'KeyT') { e.preventDefault(); handleSwitchTrack(); return; }
 
       // Call Main Queue with M
       if (e.code === 'KeyM' || e.key === 'm' || e.key === 'M') {
@@ -665,7 +730,7 @@ export default function App() {
       const seconds = Math.min(0.25, (now - lastTick) / 1000);
       lastTick = now;
       if (
-        gameStateRef.current === 'GAME_OVER' ||
+        sessionOverRef.current ||
         gameStateRef.current === 'PAUSED' ||
         isPausedRef.current
       ) {
@@ -676,14 +741,15 @@ export default function App() {
         .map(notice => ({ ...notice, remaining: notice.remaining - seconds }))
         .filter(notice => notice.remaining > 0));
       // During active loading or ready states, drain patience in standard mode
-      if (gameStateRef.current === 'LOAD_STATE' || gameStateRef.current === 'READY_STATE') {
+      const loadingTracks = TRACKS;
+      if (loadingTracks.length > 0) {
         // Queue pressure is separate from the overall patience meter.
         const pressureSeconds = settingsRef.current.zenMode ? 0 : Math.max(0, seconds - patienceClockRef.current.graceRemaining);
-        syncQueueService(pressureSeconds);
+        for (const track of TRACKS) runTrack(track, () => syncQueueService(loadingTracks.includes(track) ? pressureSeconds : 0, false, track === 'inside' ? pressureSeconds : 0));
         if (settingsRef.current.zenMode) return;
         const previousPatience = patienceRef.current;
         const next = advancePatience(previousPatience, patienceClockRef.current,
-          difficultyRef.current.passiveDrainRate + queueExtraDrain(queuePressureRef.current), seconds);
+          difficultyRef.current.passiveDrainRate + Math.min(0.3, queueExtraDrain(queuePressureByTrack.inside) + queueExtraDrain({ main: queuePressureByTrack.outside.main, single: initialQueuePressure().single })), seconds);
         updatePatience(next.patience);
         patienceClockRef.current = next.clock;
         setPatienceClock(next.clock);
@@ -694,10 +760,12 @@ export default function App() {
         }
 
         if (next.gameOver) {
+          sessionOverRef.current = true;
+          setSessionOver(true);
           gameStateRef.current = 'GAME_OVER';
           setGameState('GAME_OVER');
           soundEngine.playGameOver();
-          sceneRef.current?.setGameState('GAME_OVER');
+          sceneRef.current?.setPaused(true);
           sceneRef.current?.exitPointerLock();
         }
       }
@@ -706,17 +774,17 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Both queues receive a continuous, uncapped stream of new guests.
+  // One shared single-rider stream and an independent group stream for each side.
   useEffect(() => {
     const timer = setInterval(() => {
-      if (isPausedRef.current || !['LOAD_STATE', 'READY_STATE'].includes(gameStateRef.current)) return;
-      const nextMain = [...mainQueueRef.current, generateGroup('main', undefined, settingsRef.current.groupRandomness ?? 0)];
+      if (isPausedRef.current || sessionOverRef.current) return;
       const nextSingle = [...singleQueueRef.current, generateGroup('single')];
-      mainQueueRef.current = nextMain;
-      singleQueueRef.current = nextSingle;
-      setMainQueue(nextMain);
-      setSingleQueue(nextSingle);
-      sceneRef.current?.syncQueues(nextMain, nextSingle);
+      singleQueueRef.current = nextSingle; setSingleQueue(nextSingle);
+      for (const track of TRACKS) runTrack(track, () => {
+        const nextMain = [...mainQueueRef.current, generateGroup('main', undefined, settingsRef.current.groupRandomness ?? 0)];
+        setMainQueue(nextMain);
+        sceneRef.current?.syncQueues(nextMain, nextSingle);
+      });
     }, 3000);
     return () => clearInterval(timer);
   }, []);
@@ -781,7 +849,7 @@ export default function App() {
   // --- Toggle Gate Selection (Left Click) ---
   // Left click is reserved for selecting/deselecting the gate.
   const handleToggleGateSelection = (targetGateIndex?: number) => {
-    if (isPausedRef.current || !['LOAD_STATE', 'READY_STATE'].includes(gameStateRef.current)) return;
+    if (isPausedRef.current || sessionOverRef.current) return;
     soundEngine.init();
     const now = Date.now();
     if (now - lastClickToggleTimeRef.current < 150) {
@@ -837,62 +905,20 @@ export default function App() {
   };
 
   // --- Call Next Main Queue Group (Initiate Grouping Stage) ---
-  const handleSelectMainQueue = () => {
-    soundEngine.init();
-    if (selectedGroupRef.current && selectedGroupRef.current.type === 'main') {
-      return;
-    }
-    let curQueue = [...mainQueueRef.current];
-    if (curQueue.length === 0) {
-      // Auto replenish
-      const newGrp = generateGroup('main');
-      curQueue = [newGrp];
-      setMainQueue(curQueue);
-      mainQueueRef.current = curQueue;
-    }
-    const frontGroup = curQueue[0];
-    setSelectedGroup(frontGroup);
-    selectedGroupRef.current = frontGroup;
-    soundEngine.playSelectGroup(frontGroup.size);
-    // Queue switching keeps the player's current gate choices and hover intact.
-    // Only rider counts change to fit the newly active group.
-    const preservedGates = selectedGateIndicesRef.current;
-    const pending = getPendingAllocations(frontGroup, preservedGates);
-    setPendingAllocations(pending);
-    pendingAllocationsRef.current = pending;
-    if (sceneRef.current) {
-      sceneRef.current.setSelectedGroup(frontGroup);
-      sceneRef.current.setPendingGateAllocations(pending, preservedGates);
-    }
+  const chooseQueue = (source: TrackType | 'single') => {
+    if (isPausedRef.current || sessionOverRef.current) return;
+    selectedQueueSourceRef.current = source;
+    const queue = source === 'single' ? singleQueueRef.current : mainQueueByTrack[source];
+    const group = queue[0] ?? null;
+    selectedGroupRef.current = group;
+    setSelectedGroup(group);
+    setPendingAllocations(group ? getPendingAllocations(group, selectedGateIndicesRef.current) : {});
+    sceneRef.current?.setSelectedGroup(group);
+    sceneRef.current?.setPendingGateAllocations(pendingAllocationsRef.current, selectedGateIndicesRef.current);
+    soundEngine.playSelectGroup(group?.size ?? 1);
   };
-
-  // --- Call Solo Single Rider (Initiate Grouping Stage) ---
-  const handleSelectSingleQueue = () => {
-    soundEngine.init();
-    if (selectedGroupRef.current && selectedGroupRef.current.type === 'single') {
-      return;
-    }
-    let curQueue = [...singleQueueRef.current];
-    if (curQueue.length === 0) {
-      const newSolo = generateGroup('single');
-      curQueue = [newSolo];
-      setSingleQueue(curQueue);
-      singleQueueRef.current = curQueue;
-    }
-    const frontSolo = curQueue[0];
-    setSelectedGroup(frontSolo);
-    selectedGroupRef.current = frontSolo;
-    soundEngine.playSelectGroup(1);
-    // Queue switching keeps the player's current gate choices and hover intact.
-    const preservedGates = selectedGateIndicesRef.current;
-    const pending = getPendingAllocations(frontSolo, preservedGates);
-    setPendingAllocations(pending);
-    pendingAllocationsRef.current = pending;
-    if (sceneRef.current) {
-      sceneRef.current.setSelectedGroup(frontSolo);
-      sceneRef.current.setPendingGateAllocations(pending, preservedGates);
-    }
-  };
+  const handleSelectMainQueue = (track: TrackType = scope.current) => chooseQueue(track);
+  const handleSelectSingleQueue = () => chooseQueue('single');
 
   // --- Deselect / Cancel Grouping Stage ---
   const handleDeselect = () => {
@@ -947,7 +973,8 @@ export default function App() {
 
   // --- Confirm Grouping Stage (Pressed Enter or clicked Confirm) ---
   const handleConfirmGrouping = () => {
-    if (isPausedRef.current || !['LOAD_STATE', 'READY_STATE'].includes(gameStateRef.current)) return;
+    // Dispatch/reset animations no longer lock the next group out of confirmation.
+    if (isPausedRef.current || sessionOverRef.current || gameStateRef.current === 'GAME_OVER') return;
     soundEngine.init();
     const group = selectedGroupRef.current;
     if (!group) return;
@@ -965,19 +992,22 @@ export default function App() {
       0
     );
 
-    // Only block if literally no gates selected or 0 riders allocated
-    if (selectedGatesList.length === 0 || totalAllocated <= 0) {
-      triggerGroupingError(
-        'NO GATES SELECTED',
-        'Please select at least one gate with available seats before confirming.',
-        'invalid'
-      );
-      // Explicitly preserve current selection upon failed confirm
+    // A confirmation always boards the complete group. Gates that cannot
+    // receive riders (or an over-selection) are invalid rather than partial.
+    const allocatedGateCount = (Object.values(curPending) as number[]).filter(allocation => allocation > 0).length;
+    if (selectedGatesList.length === 0 || totalAllocated !== group.size || selectedGatesList.length !== allocatedGateCount) {
+      triggerGroupingError();
       return;
     }
 
     // Valid confirmation - dismiss any active error
     dismissGroupingError();
+    const source = selectedQueueSourceRef.current;
+    const liveQueue = source === 'single' ? singleQueueRef.current : mainQueueByTrack[source];
+    if (liveQueue[0]?.id !== group.id) {
+      chooseQueue(source);
+      return;
+    }
     const split = analyzeGroupSplit(group.size, gatesRef.current, curPending);
 
     // 1. Build assignments list in ascending gate order
@@ -1003,16 +1033,21 @@ export default function App() {
       }
     }
 
-    // Check if group was split unexpectedly or unnecessarily
-    const isPartialSplit = remainingMembers.length > 0;
+    // A strict confirmation above guarantees every member is assigned.
+    const isPartialSplit = false;
     const isKartSplit = split.unnecessaryKarts > 0;
-    const isSplitUnnecessarily = isPartialSplit || isKartSplit;
+    // Seats 0–1 board the current train; seats 2–3 remain staged for the next.
+    // A party spanning both rows has been split across two trains.
+    const isTrainSplit = new Set(assignments.map(assignment => assignment.seatSlot < 2 ? 'current' : 'next')).size > 1;
+    const isSplitUnnecessarily = isPartialSplit || isKartSplit || isTrainSplit;
 
     if (isSplitUnnecessarily) {
-      const noticeMessage = isPartialSplit
+      const noticeMessage = isTrainSplit
+        ? 'This party was placed across the current and next train.'
+        : isPartialSplit
         ? `A group was split up unnecessarily: ${assignments.length} of ${group.size} guests seated (${remainingMembers.length} remain in queue).`
         : `A group was split up unnecessarily across ${split.actualKartCount} karts (could fit in ${split.minimumFeasibleKartCount}).`;
-      triggerSplitNotification('GROUP SPLIT UNNECESSARILY', noticeMessage);
+      triggerSplitNotification(isTrainSplit ? 'GROUP SPLIT ACROSS TRAINS' : 'GROUP SPLIT UNNECESSARILY', noticeMessage);
     }
 
     // 2. Update Gates state and trigger NPC walk animation
@@ -1021,9 +1056,9 @@ export default function App() {
     // Assignment rewards and a split consequence resolve as one satisfaction update.
     const doubleGrouped = completedDoubleGates(currentGates, updatedGates);
     const assignmentReward = assignments.length
-      + queueServiceBonus(queuePressureRef.current[group.type].waitSeconds, assignments.length)
+      + queueServiceBonus(source === 'single' ? singlePressureRef.current.waitSeconds : queuePressureByTrack[source].main.waitSeconds, assignments.length)
       + doubleGrouped.length * 2;
-    const splitPenalty = split.patiencePenalty > 0 ? split.patiencePenalty : (isPartialSplit ? 4 : 0);
+    const splitPenalty = Math.min(12, split.patiencePenalty + (isTrainSplit ? 6 : 0));
 
     if (!settingsRef.current.zenMode) {
       const nextSatisfaction = Math.max(0, Math.min(100, patienceRef.current + assignmentReward - splitPenalty));
@@ -1034,13 +1069,15 @@ export default function App() {
       const notices: PatienceNotice[] = [];
       if (assignmentReward > 0) notices.push({ id: ++noticeIdRef.current, amount: assignmentReward, label: 'Group assigned', remaining: 4 });
       doubleGrouped.forEach(gateIndex => notices.push({ id: ++noticeIdRef.current, amount: 2, label: 'Double grouped', gateIndex, remaining: 4 }));
-      if (splitPenalty > 0) notices.push({ id: ++noticeIdRef.current, amount: -splitPenalty, label: 'Group split unnecessarily', remaining: 4 });
+      if (splitPenalty > 0) notices.push({ id: ++noticeIdRef.current, amount: -splitPenalty, label: isTrainSplit ? 'Group split across trains' : 'Group split unnecessarily', remaining: 4 });
       if (notices.length) setPatienceNotices(previous => [...previous.slice(-11), ...notices]);
       if (nextSatisfaction === 0) {
+        sessionOverRef.current = true;
+        setSessionOver(true);
         gameStateRef.current = 'GAME_OVER';
         setGameState('GAME_OVER');
         soundEngine.playGameOver();
-        sceneRef.current?.setGameState('GAME_OVER');
+        sceneRef.current?.setPaused(true);
         sceneRef.current?.exitPointerLock();
       }
     }
@@ -1063,59 +1100,18 @@ export default function App() {
     const isNowFull = updatedGates.some((g) => g.occupants.length === 2);
     soundEngine.playAssignSuccess(isNowFull);
 
-    // 3. Pop group from queue; if partial, keep remaining members at front of queue
-    let nextGroup: GroupData;
-    if (remainingMembers.length > 0) {
-      const remainingGroup: GroupData = {
-        ...group,
-        size: remainingMembers.length,
-        members: remainingMembers,
-      };
-      if (group.type === 'main') {
-        const newMainQueue = [remainingGroup, ...mainQueueRef.current.slice(1)];
-        setMainQueue(newMainQueue);
-        mainQueueRef.current = newMainQueue;
-        nextGroup = remainingGroup;
-        if (sceneRef.current) {
-          sceneRef.current.syncQueues(newMainQueue, singleQueueRef.current);
-        }
-      } else {
-        const newSingleQueue = [remainingGroup, ...singleQueueRef.current.slice(1)];
-        setSingleQueue(newSingleQueue);
-        singleQueueRef.current = newSingleQueue;
-        nextGroup = remainingGroup;
-        if (sceneRef.current) {
-          sceneRef.current.syncQueues(mainQueueRef.current, newSingleQueue);
-        }
-      }
-    } else {
-      if (group.type === 'main') {
-        const curMain = mainQueueRef.current;
-        const newMainQueue = curMain.slice(1);
-        while (newMainQueue.length < 10) {
-          newMainQueue.push(generateGroup('main', undefined, settingsRef.current.groupRandomness ?? 0));
-        }
-        setMainQueue(newMainQueue);
-        mainQueueRef.current = newMainQueue;
-        nextGroup = newMainQueue[0];
-        if (sceneRef.current) {
-          sceneRef.current.syncQueues(newMainQueue, singleQueueRef.current);
-        }
-      } else {
-        const curSingle = singleQueueRef.current;
-        const newSingleQueue = curSingle.slice(1);
-        while (newSingleQueue.length < 10) {
-          newSingleQueue.push(generateGroup('single'));
-        }
-        setSingleQueue(newSingleQueue);
-        singleQueueRef.current = newSingleQueue;
-        nextGroup = newSingleQueue[0];
-        if (sceneRef.current) {
-          sceneRef.current.syncQueues(mainQueueRef.current, newSingleQueue);
-        }
-      }
-    }
-
+    // Consume the selected source queue, independently of the destination track.
+    const remainingQueue = liveQueue.slice(1);
+    while (remainingQueue.length < 10) remainingQueue.push(generateGroup(group.type, group.type === 'single' ? 1 : undefined, settingsRef.current.groupRandomness ?? 0));
+    if (source === 'single') {
+      singleQueueRef.current = remainingQueue; setSingleQueue(remainingQueue);
+      sceneRef.current?.syncQueues(mainQueueRef.current, remainingQueue);
+    } else runTrack(source, () => {
+      setMainQueue(remainingQueue);
+      sceneRef.current?.syncQueues(remainingQueue, singleQueueRef.current);
+      syncQueueService();
+    });
+    const nextGroup = remainingQueue[0];
     syncQueueService();
 
     // 4. Start grouping the next group from the same queue at the same gate.
@@ -1147,7 +1143,9 @@ export default function App() {
 
   // --- Trigger Train Dispatch ---
   const handleTriggerDispatch = () => {
-    if (isPausedRef.current || !['LOAD_STATE', 'READY_STATE'].includes(gameStateRef.current)) return;
+    const dispatchTrack = scope.current;
+    if (sceneRef.current?.isTrackInTransit(dispatchTrack)) return;
+    if (isPausedRef.current || sessionOverRef.current || !['LOAD_STATE', 'READY_STATE'].includes(gameStateRef.current)) return;
     soundEngine.init();
     const currentGates = gatesRef.current;
     const rewards = dispatchRewards(currentGates, difficultyRef.current.maxReward);
@@ -1171,6 +1169,9 @@ export default function App() {
     const isPerfect = totalDispatchedRiders === 16;
     rewardPatience(rewards.patience, isPerfect ? 'Full train' : 'Train dispatched');
     rewardPatience(serviceReward.patience, 'Balanced service');
+    const splitGroups = groupsSplitAcrossTrains(currentGates, splitTrainGroupsRef.current);
+    for (const id of splitGroups) splitTrainGroupsRef.current.add(id);
+    applyPatiencePenalty(splitGroups.length * SPLIT_TRAIN_PATIENCE_PENALTY, 'Group split across trains');
     const currentStats = statsRef.current;
 
     // Score calculations
@@ -1194,7 +1195,7 @@ export default function App() {
     else if (newDispatched >= 3 && avgEfficiency >= 80) rating = 'SPECIALIST';
     else if (newDispatched >= 1) rating = 'OPERATOR';
 
-    setStats({
+    const dispatchedStats: SimulationStats = {
       score: currentStats.score + addedScore,
       trainsDispatched: newDispatched,
       perfectTrains: currentStats.perfectTrains + (isPerfect ? 1 : 0),
@@ -1205,8 +1206,15 @@ export default function App() {
       currentStreak: newStreak,
       bestStreak: bestStreak,
       timeElapsed: currentStats.timeElapsed,
+      groupsDeparted: currentStats.groupsDeparted ?? 0,
+      guestsPerMinute: currentStats.timeElapsed > 0 ? Math.round((newGuests / (currentStats.timeElapsed / 60)) * 10) / 10 : 0,
+      avgDispatchIntervalSeconds: newDispatched > 0 ? Math.round(currentStats.timeElapsed / newDispatched) : 0,
+      insideTrainsDispatched: (currentStats.insideTrainsDispatched ?? 0) + (dispatchTrack === 'inside' ? 1 : 0),
+      outsideTrainsDispatched: (currentStats.outsideTrainsDispatched ?? 0) + (dispatchTrack === 'outside' ? 1 : 0),
       shiftRating: rating,
-    });
+    };
+    statsRef.current = dispatchedStats;
+    setStats(dispatchedStats);
 
     // Confetti celebration on full 16/16 train!
     if (isPerfect) {
@@ -1225,48 +1233,55 @@ export default function App() {
 
     // Trigger 3D Launch Animation
     if (sceneRef.current) {
-      sceneRef.current.triggerDispatchAnimation(() => {
+      sceneRef.current.triggerDispatchAnimation(() => runTrack(dispatchTrack, () => {
         // Once train speeds away, advance next train (RESET_STATE)
         gameStateRef.current = 'RESET_STATE';
         setGameState('RESET_STATE');
         setDispatchProgress({ label: 'Next train arriving', seconds: 0 });
         if (sceneRef.current) {
           sceneRef.current.setGameState('RESET_STATE');
-          sceneRef.current.triggerResetAnimation(() => {
-            // Front 2 guests boarded; the queued guests automatically move up to the front
-            const updatedGates: GateState[] = gatesRef.current.map((g) => {
-              const remainingOccupants = g.occupants.slice(2);
-              return {
-                ...g,
-                occupants: remainingOccupants,
-                capacity: 4,
-                status: remainingOccupants.length === 0 ? 'empty' : remainingOccupants.length >= 2 ? 'full' : 'partial',
-              };
-            });
-            setGates(updatedGates);
-            gatesRef.current = updatedGates;
-            syncQueueService(0, true);
-            rewardPatience(rewards.stagedPatience, 'Staged riders advanced');
+          sceneRef.current.triggerResetAnimation(() => runTrack(dispatchTrack, () => {
             setDispatchProgress(null);
-            if (sceneRef.current) {
-              sceneRef.current.updateGates(updatedGates);
-            }
-            const hasOccupants = updatedGates.some((g) => g.occupants.length > 0);
+            const hasOccupants = gatesRef.current.some((g) => g.occupants.length > 0);
             const nextState: GameState = hasOccupants ? 'READY_STATE' : 'LOAD_STATE';
             gameStateRef.current = nextState;
             setGameState(nextState);
             if (sceneRef.current) {
               sceneRef.current.setGameState(nextState);
             }
-          });
+          }));
         }
+      }));
+      // The departing train owns the front row now. Promote the staged row
+      // immediately so the next group can be selected without a five-second lockout.
+      const updatedGates: GateState[] = gatesRef.current.map(gate => {
+        const occupants = gate.occupants.slice(2);
+        return { ...gate, occupants, capacity: 4, status: occupants.length === 0 ? 'empty' : occupants.length >= 2 ? 'full' : 'partial' };
       });
+      setGates(updatedGates);
+      gatesRef.current = updatedGates;
+      syncQueueService(0, true);
+      rewardPatience(rewards.stagedPatience, 'Staged riders advanced');
+      sceneRef.current.releaseBoardingRow(updatedGates);
+
     }
   };
 
   // --- Restart New Shift ---
   const handleRestart = () => {
+    splitTrainGroupsRef.current.clear();
     sceneRef.current?.resetRide();
+    sessionOverRef.current = false;
+    setSessionOver(false);
+    for (const track of TRACKS) runTrack(track, () => {
+      setMainQueue(createInitialQueues(settingsRef.current.groupRandomness ?? 0).mainQueue);
+      setGates(Array.from({ length: GATE_COUNT }, (_, index) => ({ index, occupants: [], capacity: 4, status: 'empty', vehicleIndex: Math.floor(index / 2) })));
+      setGameState('LOAD_STATE');
+      setSelectedGateIndices([]); setPendingAllocations({}); setHoveredGateIndex(0); setDispatchProgress(null);
+      sceneRef.current?.setGameState('LOAD_STATE');
+      sceneRef.current?.updateGates(gatesRef.current);
+      syncQueueService(0, true);
+    });
     resetPatienceClock();
     setDispatchProgress(null);
     const { mainQueue: newMain, singleQueue: newSingle } = createInitialQueues(settingsRef.current.groupRandomness ?? 0);
@@ -1287,14 +1302,16 @@ export default function App() {
     syncQueueService(0, true);
 
     updatePatience(settingsRef.current.zenMode ? 100 : difficultyRef.current.initialPatience);
-    setSelectedGroup(null);
-    selectedGroupRef.current = null;
+    selectedQueueSourceRef.current = scope.current;
+    const initialGroup = newMain[0] ?? null;
+    setSelectedGroup(initialGroup);
+    selectedGroupRef.current = initialGroup;
     setSelectedGateIndices([]);
     selectedGateIndicesRef.current = [];
     setPendingAllocations({});
     pendingAllocationsRef.current = {};
-    setHoveredGateIndex(null);
-    hoveredGateIndexRef.current = null;
+    setHoveredGateIndex(0);
+    hoveredGateIndexRef.current = 0;
     setGameState('LOAD_STATE');
     gameStateRef.current = 'LOAD_STATE';
     setIsPaused(false);
@@ -1311,6 +1328,11 @@ export default function App() {
       currentStreak: 0,
       bestStreak: 0,
       timeElapsed: 0,
+      groupsDeparted: 0,
+      guestsPerMinute: 0,
+      avgDispatchIntervalSeconds: 0,
+      insideTrainsDispatched: 0,
+      outsideTrainsDispatched: 0,
       shiftRating: 'ROOKIE',
     });
 
@@ -1319,9 +1341,14 @@ export default function App() {
       sceneRef.current.updateGates(emptyGates);
       sceneRef.current.setPatience(settings.zenMode ? 100 : difficulty.initialPatience);
       sceneRef.current.setGameState('LOAD_STATE');
-      sceneRef.current.setSelectedGroup(null);
+      sceneRef.current.setSelectedGroup(initialGroup);
       sceneRef.current.setPendingGateAllocations({}, []);
+      sceneRef.current.setHoveredGate(0);
       sceneRef.current.setPaused(false);
+      for (const track of TRACKS) runTrack(track, () => {
+        sceneRef.current?.syncQueues(mainQueueRef.current, singleQueueRef.current);
+        syncQueueService(0, true);
+      });
     }
   };
 
@@ -1406,7 +1433,7 @@ export default function App() {
     let wasConnected = false;
     const poll = (now: number) => {
       const menu = activeControllerMenu();
-      const mode = menu || isPausedRef.current || showTutorial || gameStateRef.current === 'GAME_OVER' ? 'menu' : 'gameplay';
+      const mode = menu || isPausedRef.current || showTutorial || sessionOverRef.current ? 'menu' : 'gameplay';
       const sample = controllerRef.current.sample(navigator.getGamepads?.() ?? [], now, mode);
       if (sample.connected) {
         wasConnected = true;
@@ -1429,6 +1456,7 @@ export default function App() {
           else if (action === 'confirmGroup') handleConfirmGrouping();
           else if (action === 'mainQueue') handleSelectMainQueue();
           else if (action === 'singleQueue') handleSelectSingleQueue();
+          else if (action === 'switchTrack') handleSwitchTrack();
           else if (action === 'cancel') handleDeselect();
           else if (action === 'interact') sceneRef.current?.handleInteraction();
           else if (action === 'jump') sceneRef.current?.controllerJump();
@@ -1456,7 +1484,7 @@ export default function App() {
 
       {/* Main Operations HUD Overlay */}
       <StationHUD
-        gameState={gameState}
+        gameState={sessionOver ? 'GAME_OVER' : gameState}
         patience={patience}
         patienceClock={patienceClock}
         patienceNotices={patienceNotices}
@@ -1465,6 +1493,15 @@ export default function App() {
         serviceTargets={serviceTargets}
         dispatchProgress={dispatchProgress}
         selectedGroup={selectedGroup}
+        activeTrack={activeTrack}
+        insideGameState={gameStateByTrack.inside}
+        outsideGameState={gameStateByTrack.outside}
+        insideSeatsCount={gatesByTrack.inside.reduce((sum, gate) => sum + Math.min(2, gate.occupants.length), 0)}
+        outsideSeatsCount={gatesByTrack.outside.reduce((sum, gate) => sum + Math.min(2, gate.occupants.length), 0)}
+        onTriggerDispatchTrack={track => runTrack(track, () => handleTriggerDispatch())}
+        onSwitchTrack={handleSwitchTrack}
+        selectedQueueType={selectedGroup?.type ?? null}
+        notification={queueNotification}
         hoveredGateIndex={hoveredGateIndex}
         selectedGateIndices={selectedGateIndices}
         pendingAllocations={pendingAllocations}
@@ -1482,7 +1519,9 @@ export default function App() {
         onDismissError={dismissGroupingError}
         onToggleSound={handleToggleSound}
         onRequestPointerLock={handleRequestPointerLock}
-        onSelectMainQueue={handleSelectMainQueue}
+        onSelectMainQueue={() => handleSelectMainQueue()}
+        onSelectQueue={chooseQueue}
+        selectedQueueSource={selectedQueueSourceRef.current}
         onSelectSingleQueue={handleSelectSingleQueue}
         onAssignToGate={handleAssignToGate}
         onConfirmGrouping={handleConfirmGrouping}
@@ -1515,7 +1554,7 @@ export default function App() {
       {showTutorial && <TutorialModal onClose={() => setShowTutorial(false)} />}
 
       {/* Game Over Shift Debrief */}
-      {gameState === 'GAME_OVER' && <GameOverModal stats={stats} onRestart={handleRestart} />}
+      {sessionOver && <GameOverModal stats={stats} onRestart={handleRestart} />}
     </main>
   );
 }

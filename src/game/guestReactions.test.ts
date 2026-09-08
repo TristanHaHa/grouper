@@ -122,3 +122,18 @@ test('Zen mode cancels anger and a new leader receives a fresh warning', t => {
   assert.equal(mesh.getObjectByName('guestSymbol')!.visible, false);
   assert.equal(mesh.rotation.y, -Math.PI / 2);
 });
+
+test('outside anger is isolated and shared singles can leave while inside dispatches', t => {
+  const { reactions, add, pressure } = fixture(t);
+  const inside = generateGroup('main', 1), outside = generateGroup('main', 1), single = generateGroup('single', 1);
+  add(inside); add(outside); add(single);
+  const insidePressure = pressure([inside], [single], 120);
+  const outsidePressure = pressure([outside], [single], 61);
+  const events = reactions.update(1, [inside], [single], insidePressure, false, false,
+    { queue: [outside], pressure: outsidePressure, loading: true }).filter(e => e.type === 'departure');
+  assert.deepEqual(events.map(e => [e.queue, e.track]), [['single', 'outside'], ['main', 'outside']]);
+  assert.ok(!events.some(e => e.groupId === inside.id));
+  const again = reactions.update(1, [inside], [single], insidePressure, false, false,
+    { queue: [outside], pressure: outsidePressure, loading: true });
+  assert.equal(again.filter(e => e.type === 'departure').length, 0);
+});

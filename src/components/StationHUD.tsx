@@ -68,6 +68,8 @@ interface StationHUDProps {
   onToggleSound: () => void;
   onRequestPointerLock: () => void;
   onSelectMainQueue: () => void;
+  onSelectQueue?: (source: 'inside' | 'outside' | 'single') => void;
+  selectedQueueSource?: 'inside' | 'outside' | 'single';
   onSelectSingleQueue: () => void;
   onAssignToGate: (gateIndex: number) => void;
   onConfirmGrouping?: () => void;
@@ -122,6 +124,8 @@ export const StationHUD: React.FC<StationHUDProps> = ({
   onToggleSound,
   onRequestPointerLock,
   onSelectMainQueue,
+  onSelectQueue,
+  selectedQueueSource = 'inside',
   onSelectSingleQueue,
   onAssignToGate,
   onConfirmGrouping,
@@ -155,66 +159,7 @@ export const StationHUD: React.FC<StationHUDProps> = ({
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 md:p-6 select-none font-sans overflow-hidden">
-      {/* --- Notification Popup (Unobtrusive Toast for Splits vs Error Modal for Blockers) --- */}
-      {groupingError && groupingError.type === 'split' ? (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-auto max-w-md w-[92%] animate-in fade-in slide-in-from-top-3 duration-200">
-          <div className="bg-neutral-900/95 border border-amber-500/70 rounded-xl px-4 py-2.5 shadow-[0_8px_24px_rgba(245,158,11,0.25)] flex items-center gap-3 backdrop-blur-md">
-            <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 text-amber-400">
-              <AlertCircle className="w-4 h-4" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2">
-                <h4 className="text-[11px] font-mono font-bold text-amber-400 uppercase tracking-wider">
-                  {groupingError.title}
-                </h4>
-                {onDismissError && (
-                  <button
-                    onClick={onDismissError}
-                    aria-label="Dismiss notification"
-                    className="text-neutral-400 hover:text-white p-0.5 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-              <p className="text-xs text-neutral-200 mt-0.5 leading-snug">
-                {groupingError.message}
-              </p>
-            </div>
-          </div>
-        </div>
-      ) : groupingError ? (
-        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 pointer-events-auto max-w-lg w-[92%] animate-in fade-in zoom-in-95 duration-150">
-          <div className="bg-neutral-950/95 border-2 border-rose-500 rounded-2xl p-4 shadow-[0_0_35px_rgba(244,63,94,0.45)] flex items-start gap-3.5 backdrop-blur-md">
-            <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/50 flex items-center justify-center shrink-0 text-rose-400">
-              <AlertTriangle className="w-5 h-5 animate-pulse" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-mono font-black text-rose-400 uppercase tracking-wide">
-                  {groupingError.title}
-                </h4>
-                {onDismissError && (
-                  <button
-                    onClick={onDismissError}
-                    className="text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-              <p className="text-xs text-neutral-200 mt-1 leading-relaxed font-sans">
-                {groupingError.message}
-              </p>
-              <div className="mt-2 text-[10px] font-mono text-neutral-400 bg-neutral-900 px-2.5 py-1 rounded border border-neutral-800 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
-                <span>Select or deselect gates with keys <strong className="text-sky-300">1–4</strong> for active karts.</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
+      <div className="shrink-0">
       {/* --- TOP BAR: Operations Header & Live Metrics --- */}
       <header className="flex flex-wrap md:flex-nowrap items-start justify-between gap-4 pointer-events-auto">
         {/* Ride Status Badge & Coaster Logo */}
@@ -249,7 +194,7 @@ export const StationHUD: React.FC<StationHUDProps> = ({
         </div>
 
         {/* Live Patience Bar / Zen Mode Gauge */}
-        <div className="order-last basis-full md:order-none md:basis-auto flex-1 max-w-xl mx-auto md:px-4">
+        <div aria-label="Guest satisfaction" className="order-last basis-full md:order-none md:basis-auto flex-1 max-w-xl mx-auto md:px-4">
           <div className={`bg-neutral-900/90 backdrop-blur-md border rounded-xl p-3 shadow-xl transition-colors ${patienceLossFlash ? 'border-rose-400 bg-rose-950/80 animate-pulse shadow-[0_0_20px_rgba(244,63,94,0.75)]' : 'border-neutral-700/80'}`}>
             <div className="flex items-center justify-between text-xs font-mono font-bold mb-1.5">
               <div className="flex items-center gap-1.5 text-neutral-300">
@@ -370,6 +315,79 @@ export const StationHUD: React.FC<StationHUDProps> = ({
           </button>
         </div>
       </header>
+      <div aria-label="Notifications" aria-live="polite" className="mt-3 flex flex-col items-center gap-2">
+      {/* --- Notification Popup (Unobtrusive Toast for Splits vs Error Modal for Blockers) --- */}
+      {groupingError && groupingError.type === 'split' ? (
+        <div className="relative z-40 pointer-events-auto max-w-md w-[92%] animate-in fade-in slide-in-from-top-3 duration-200">
+          <div className="bg-neutral-900/95 border border-amber-500/70 rounded-xl px-4 py-2.5 shadow-[0_8px_24px_rgba(245,158,11,0.25)] flex items-center gap-3 backdrop-blur-md">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 text-amber-400">
+              <AlertCircle className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-[11px] font-mono font-bold text-amber-400 uppercase tracking-wider">
+                  {groupingError.title}
+                </h4>
+                {onDismissError && (
+                  <button
+                    onClick={onDismissError}
+                    aria-label="Dismiss notification"
+                    className="text-neutral-400 hover:text-white p-0.5 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-neutral-200 mt-0.5 leading-snug">
+                {groupingError.message}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : groupingError ? (
+        <div className="relative z-40 pointer-events-auto max-w-lg w-[92%] animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-neutral-950/95 border-2 border-rose-500 rounded-2xl p-4 shadow-[0_0_35px_rgba(244,63,94,0.45)] flex items-start gap-3.5 backdrop-blur-md">
+            <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/50 flex items-center justify-center shrink-0 text-rose-400">
+              <AlertTriangle className="w-5 h-5 animate-pulse" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-mono font-black text-rose-400 uppercase tracking-wide">
+                  {groupingError.title}
+                </h4>
+                {onDismissError && (
+                  <button
+                    onClick={onDismissError}
+                    className="text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-neutral-200 mt-1 leading-relaxed font-sans">
+                {groupingError.message}
+              </p>
+              <div className="mt-2 text-[10px] font-mono text-neutral-400 bg-neutral-900 px-2.5 py-1 rounded border border-neutral-800 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                <span>Select or deselect gates with keys <strong className="text-sky-300">1–4</strong> for active karts.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {notification && (
+        <div className="relative z-40 max-w-[92%] rounded-full border border-white/25 bg-neutral-950/90 px-4 py-2 shadow-lg backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="flex items-center gap-2 text-xs font-mono">
+            <span>{notification.icon ?? '•'}</span>
+            <span className="font-bold text-white">{notification.message}</span>
+            {notification.submessage && <span className="hidden sm:inline text-neutral-400">— {notification.submessage}</span>}
+          </div>
+        </div>
+      )}
+
+      </div>
+      </div>
 
       {/* --- CENTER: Dynamic First-Person Crosshair & Raycast Prompts --- */}
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
@@ -427,12 +445,36 @@ export const StationHUD: React.FC<StationHUDProps> = ({
             ? 'border border-sky-500/70 shadow-[0_0_16px_rgba(56,189,248,0.15)]'
             : 'border border-neutral-700/80'
         }`}>
+          <div className="mb-2 flex items-center gap-2 text-xs" aria-label="Queue selection">
+            <span className="text-neutral-400">QUEUE</span>
+            {(['inside', 'outside', 'single'] as const).map(source => <button key={source}
+              aria-label={`Select ${source} queue`} onClick={() => onSelectQueue?.(source)}
+              className={`rounded border px-3 py-1 font-bold uppercase ${selectedQueueSource === source && selectedGroup ? 'border-amber-400 text-amber-200 bg-amber-950/40' : 'border-neutral-700 text-neutral-300'}`}>
+              {source === 'single' ? 'Single riders' : source + ' groups'}
+            </button>)}
+            <span className="ml-auto text-neutral-400">Y / T: switch gates</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mb-2" aria-label="Track status">
+            {(['inside', 'outside'] as const).map(track => {
+              const state = track === 'inside' ? insideGameState : outsideGameState;
+              const seats = track === 'inside' ? insideSeatsCount : outsideSeatsCount;
+              return <div key={track} className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs ${activeTrack === track ? 'border-sky-400 bg-sky-950/50' : 'border-neutral-700'}`}>
+                <button aria-label={`Select ${track} track`} onClick={() => { if (track !== activeTrack) onSwitchTrack?.(); }} className="text-left font-bold uppercase">
+                  {track} | {seats}/16 <span className="block text-[10px] text-neutral-400">{state.replace('_STATE', '').replace('_', ' ')}</span>
+                </button>
+                <button aria-label={`Dispatch ${track}`} disabled={state !== 'READY_STATE'} onClick={() => onTriggerDispatchTrack?.(track)} className="rounded bg-emerald-700 px-2 py-1 font-bold disabled:opacity-30">DISPATCH</button>
+              </div>;
+            })}
+          </div>
           {/* Header Row: Title, Seat Stats, Compact Party Chip (Zero Box Expansion), and Actions */}
           <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-neutral-800/80">
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-xs font-mono font-black text-amber-400 tracking-wider flex items-center gap-1.5 shrink-0">
                 🏎️ MARIO KART TRAIN OCCUPANCY
               </span>
+              <button onClick={onSwitchTrack} className={`rounded border px-2 py-0.5 text-[10px] font-mono font-black tracking-wide transition-colors ${activeTrack === 'inside' ? 'border-amber-300 bg-amber-500/20 text-amber-200' : 'border-sky-300 bg-sky-500/20 text-sky-200'}`}>
+                {activeTrack === 'inside' ? 'INSIDE TRACK' : 'OUTSIDE TRACK'}
+              </button>
               <span className="text-xs font-mono font-bold text-amber-300 bg-neutral-950 px-2 py-0.5 rounded border border-neutral-700 shrink-0">
                 {boardingSeats} / 16 SEATS ({efficiency}%)
               </span>
@@ -454,7 +496,7 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                     </span>
                     <span className="text-[11px] font-mono font-bold text-white whitespace-nowrap flex items-center gap-1">
                       <span className={`font-black tracking-wide ${selectedGroup.type === 'main' ? 'text-amber-400' : 'text-cyan-400'}`}>
-                        {selectedGroup.type === 'main' ? 'MAIN QUEUE' : 'SINGLE RIDER'}
+                        {selectedGroup.type === 'main' ? selectedQueueSource.toUpperCase() + ' QUEUE' : 'SINGLE RIDER'}
                       </span>
                       <span className="text-neutral-500">•</span>
                       <span className="text-neutral-300">
@@ -504,17 +546,11 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                       onConfirmGrouping?.();
                     }}
                     className={`px-3 py-1 rounded-lg text-[11px] font-mono font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      totalAllocated >= selectedGroup.size
+                      totalAllocated === selectedGroup.size
                         ? 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.4)]'
-                        : totalAllocated > 0
-                        ? 'bg-amber-600 hover:bg-amber-500 text-white border border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
                         : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400 border border-neutral-700 opacity-60'
                     }`}
-                    title={
-                      totalAllocated > 0 && totalAllocated < selectedGroup.size
-                        ? "Let partial group board (splits group) [Right Click / Enter]"
-                        : "Confirm gate assignments and let group board [Right Click / Enter]"
-                    }
+                    title="Confirm gate assignments and let group board [Right Click / Enter]"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>LET GROUP GO [R-CLICK]</span>
@@ -606,17 +642,6 @@ export const StationHUD: React.FC<StationHUDProps> = ({
           </div>
 
           {/* 4 Vehicles containing 8 Gates Matrix */}
-          {selectedGroup && groupSplitPreview && groupSplitPreview.unnecessaryKarts > 0 && (
-            <div className="mb-2 rounded-lg border border-amber-400/70 bg-amber-950/80 px-3 py-2 text-[11px] font-mono text-amber-200 shadow-[0_0_14px_rgba(251,191,36,0.18)]">
-              This group could fit in {groupSplitPreview.minimumFeasibleKartCount} kart{groupSplitPreview.minimumFeasibleKartCount === 1 ? '' : 's'}. You’re using {groupSplitPreview.actualKartCount}.
-              {groupSplitPreview.alternativeKartIndices.length > 0 && <span className="ml-2 text-emerald-300">Outlined karts have room.</span>}
-            </div>
-          )}
-          {selectedGroup && totalAllocated > 0 && totalAllocated < selectedGroup.size && (
-            <div className="mb-2 rounded-lg border border-amber-400/70 bg-amber-950/80 px-3 py-2 text-[11px] font-mono text-amber-200 shadow-[0_0_14px_rgba(251,191,36,0.18)]">
-              Partial group selection: Seating {totalAllocated} of {selectedGroup.size} guests. Confirming will split this group ({selectedGroup.size - totalAllocated} remaining in queue).
-            </div>
-          )}
           <div className="grid grid-cols-4 gap-2.5">
             {[0, 1, 2, 3].map((vIdx) => {
               const gateIdxA = vIdx * 2;
@@ -631,7 +656,6 @@ export const StationHUD: React.FC<StationHUDProps> = ({
               const isHoveredB = selectedGroup !== null && hoveredGateIndex === gateIdxB;
               const pendingA = pendingAllocations[gateIdxA] || 0;
               const pendingB = pendingAllocations[gateIdxB] || 0;
-              const isAlternativeKart = groupSplitPreview?.unnecessaryKarts && groupSplitPreview.alternativeKartIndices.includes(vIdx);
               const isSplitPenaltyKart = splitPenaltyKartIndices.includes(vIdx);
 
               return (
@@ -640,9 +664,7 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                   className={`rounded-xl p-2 flex flex-col gap-1.5 bg-neutral-950/85 border transition-all shadow-sm ${
                     isSplitPenaltyKart
                       ? 'border-rose-400 ring-2 ring-amber-400 animate-pulse shadow-[0_0_20px_rgba(251,146,60,0.8)]'
-                      : isAlternativeKart
-                        ? 'border-emerald-400 ring-1 ring-emerald-400/70 shadow-[0_0_14px_rgba(52,211,153,0.35)]'
-                        : 'border-neutral-800'
+                      : 'border-neutral-800'
                   }`}
                 >
                   <div className="flex items-center justify-between">
@@ -658,13 +680,13 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                     {/* Gate A */}
                     <button
                       type="button"
-                      disabled={gameState !== 'LOAD_STATE' && gameState !== 'READY_STATE'}
+                      disabled={gameState === 'GAME_OVER' || gameState === 'PAUSED'}
                       onClick={(e) => {
                         e.stopPropagation();
                         onAssignToGate?.(gateIdxA);
                       }}
                       title={`Gate ${gateIdxA + 1} (${occA}/4: ${Math.min(2, occA)} boarding, ${Math.max(0, occA - 2)} in queue) • Left Click to Select/Deselect`}
-                      className={`relative rounded-lg flex flex-col items-center justify-center transition-all cursor-pointer select-none text-left w-full ${occA === 4 ? 'border-4 border-double p-[3px] outline outline-2 outline-offset-[3px] outline-cyan-300 shadow-[0_0_16px_rgba(34,211,238,0.8)]' : 'border p-1.5'} ${
+                      className={`relative rounded-lg flex flex-col items-center justify-center transition-all cursor-pointer select-none text-left w-full ${occA === 4 ? 'border-4 border-double p-[3px] shadow-[0_0_16px_rgba(34,211,238,0.8)]' : 'border p-1.5'} ${
                         isSelectedA
                           ? 'bg-sky-950/90 border-sky-400 text-sky-200 shadow-[0_0_14px_rgba(56,189,248,0.5)] ring-2 ring-sky-400'
                           : occA === 4
@@ -732,7 +754,7 @@ export const StationHUD: React.FC<StationHUDProps> = ({
                         onAssignToGate?.(gateIdxB);
                       }}
                       title={`Gate ${gateIdxB + 1} (${occB}/4: ${Math.min(2, occB)} boarding, ${Math.max(0, occB - 2)} in queue) • Left Click to Select/Deselect`}
-                      className={`relative rounded-lg flex flex-col items-center justify-center transition-all cursor-pointer select-none text-left w-full ${occB === 4 ? 'border-4 border-double p-[3px] outline outline-2 outline-offset-[3px] outline-cyan-300 shadow-[0_0_16px_rgba(34,211,238,0.8)]' : 'border p-1.5'} ${
+                      className={`relative rounded-lg flex flex-col items-center justify-center transition-all cursor-pointer select-none text-left w-full ${occB === 4 ? 'border-4 border-double p-[3px] shadow-[0_0_16px_rgba(34,211,238,0.8)]' : 'border p-1.5'} ${
                         isSelectedB
                           ? 'bg-sky-950/90 border-sky-400 text-sky-200 shadow-[0_0_14px_rgba(56,189,248,0.5)] ring-2 ring-sky-400'
                           : occB === 4

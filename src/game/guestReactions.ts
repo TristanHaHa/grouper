@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import type { GroupData, NPCData, QueueType } from '../types';
+import type { GroupData, NPCData, QueueType, TrackType } from '../types';
 import { QUEUE_DRAIN_SECONDS, queueUrgency, type QueuePressure } from './queueService';
 
 type Mood = ReturnType<typeof queueUrgency>;
 
 export type GuestReactionEvent =
-  | { type: 'warning'; queue: QueueType; groupId: string; leaderId: string }
-  | { type: 'departure'; queue: QueueType; groupId: string; leaderId: string };
+  | { type: 'warning'; queue: QueueType; track?: TrackType; groupId: string; leaderId: string }
+  | { type: 'departure'; queue: QueueType; track?: TrackType; groupId: string; leaderId: string };
 
 type Guest = {
   npc: NPCData;
@@ -54,8 +54,9 @@ export class GuestReactions {
     return [mood, new THREE.TubeGeometry(curve, 12, 0.007, 5, false)];
   })) as Record<Mood, THREE.TubeGeometry>;
   private symbolTextures = new Map<string, THREE.CanvasTexture>();
-  private queueState: Record<QueueType, QueueReactionState> = {
+  private queueState: Record<QueueType | 'outside', QueueReactionState> = {
     main: this.createQueueState(),
+    outside: this.createQueueState(),
     single: this.createQueueState(),
   };
 
@@ -222,15 +223,20 @@ export class GuestReactions {
     bar.material.map!.needsUpdate = true;
   }
 
-  public update(delta: number, main: GroupData[], single: GroupData[], pressure: QueuePressure, zenMode: boolean, canShowSymbols: boolean): GuestReactionEvent[] {
+  public update(delta: number, main: GroupData[], single: GroupData[], pressure: QueuePressure, zenMode: boolean, canShowSymbols: boolean, outside?: { queue: GroupData[]; pressure: QueuePressure; loading: boolean }): GuestReactionEvent[] {
     this.time += delta;
     const events: GuestReactionEvent[] = [];
     const active = new Map<string, Mood>();
     for (const symbol of this.floatingSymbols.values()) symbol.visible = false;
 
-    for (const [type, queue] of [['main', main], ['single', single]] as const) {
+    const queues = [
+      { type: 'main' as const, queue: main, wait: pressure.main, loading: canShowSymbols, track: 'inside' as TrackType },
+      { type: 'single' as const, queue: single, wait: pressure.single, loading: canShowSymbols || !!outside?.loading, track: canShowSymbols ? 'inside' as TrackType : 'outside' as TrackType },
+      ...(outside ? [{ type: 'outside' as const, queue: outside.queue, wait: outside.pressure.main, loading: outside.loading, track: 'outside' as TrackType }] : []),
+    ];
+    for (const { type, queue, wait, loading, track } of queues) {
       queue.slice(0, 5).forEach((group, index) => {
-        const patienceWait = Math.max(0, pressure[type].waitSeconds - index * GROUP_PATIENCE_STAGGER_SECONDS);
+        const patienceWait = Math.max(0, wait.waitSeconds - index * GROUP_PATIENCE_STAGGER_SECONDS);
         const groupWait = patienceWait * 2;
         const mood = zenMode ? 'green' : queueUrgency(groupWait);
         group.members.forEach(npc => active.set(npc.id, mood));
@@ -247,22 +253,22 @@ export class GuestReactions {
       }
 
       const frontGuest = leader ? this.guests.get(leader) : undefined;
-      const eligible = !zenMode && pressure[type].groupId === queue[0]?.id
-        && pressure[type].waitSeconds >= QUEUE_DRAIN_SECONDS && frontGuest
+      const eligible = !zenMode && wait.groupId === queue[0]?.id
+        && wait.waitSeconds >= QUEUE_DRAIN_SECONDS && frontGuest
         && !frontGuest.npc.isWalking && !frontGuest.mesh.userData.isRider;
       if (!eligible) {
         state.warningElapsed = 0;
         state.warningEmitted = false;
         state.departureEmitted = false;
-      } else if (canShowSymbols) {
+      } else if (loading) {
         if (!state.warningEmitted) {
-          events.push({ type: 'warning', queue: type, groupId: frontGuest.npc.groupId, leaderId: frontGuest.npc.id });
+          events.push({ type: 'warning', queue: type === 'outside' ? 'main' : type, track, groupId: frontGuest.npc.groupId, leaderId: frontGuest.npc.id });
           state.warningEmitted = true;
         }
         // The bar reaches zero at the exact departure threshold. Do not leave a
         // second invisible countdown between an empty bar and the group leaving.
         if (!state.departureEmitted) {
-          events.push({ type: 'departure', queue: type, groupId: frontGuest.npc.groupId, leaderId: frontGuest.npc.id });
+          events.push({ type: 'departure', queue: type === 'outside' ? 'main' : type, track, groupId: frontGuest.npc.groupId, leaderId: frontGuest.npc.id });
           state.departureEmitted = true;
         }
         const symbol = this.getSymbol(frontGuest);

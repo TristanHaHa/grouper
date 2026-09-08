@@ -13,9 +13,9 @@ export const TOTAL_SEATS = 16;
 // Spatial Coordinates (3D Three.js Units)
 // Symmetrical Station Layout:
 // Platform center is around X = 0
-// Inside Track runs along Z axis at X = -5.6 (Gates at X = -3.8, Queue at X = -1.6)
-// Outside Track runs along Z axis at X = +5.6 (Gates at X = +3.8, Queue at X = +1.6)
-// Control Console with dual dispatch buttons is centered at (0, 0, 5.5)
+// Inside: track X=-9.6, gates X=-7.8, group queue X=-3.7.
+// Outside: track X=9.6, gates X=7.8, group queue X=3.7.
+// Shared singles occupy the far end (X=0, Z=-3); the console is beside the inside queue.
 export const GATE_Z_POSITIONS = [
   5.25,  // Gate 1 (Vehicle 1, Row 1)
   3.75,  // Gate 2 (Vehicle 1, Row 2)
@@ -35,30 +35,26 @@ export const VEHICLE_Z_CENTERS = [
 ];
 
 // Dual Track Coordinates
-export const INSIDE_TRACK_X = -5.6;
-export const OUTSIDE_TRACK_X = 5.6;
-export const INSIDE_GATE_LINE_X = -3.8;
-export const OUTSIDE_GATE_LINE_X = 3.8;
+export const INSIDE_TRACK_X = -9.6;
+export const OUTSIDE_TRACK_X = 9.6;
+export const INSIDE_GATE_LINE_X = -7.8;
+export const OUTSIDE_GATE_LINE_X = 7.8;
 
 // Inside and Outside Queue Line Coordinates
-export const INSIDE_MAIN_QUEUE_STOP_X = -1.6;
-export const INSIDE_SINGLE_QUEUE_STOP_X = -1.6;
-export const OUTSIDE_MAIN_QUEUE_STOP_X = 1.6;
-export const OUTSIDE_SINGLE_QUEUE_STOP_X = 1.6;
+export const INSIDE_MAIN_QUEUE_STOP_X = -3.7;
+export const OUTSIDE_MAIN_QUEUE_STOP_X = 3.7;
 
 // Backward Compatibility Aliases
 export const TRACK_X = INSIDE_TRACK_X;
 export const GATE_LINE_X = INSIDE_GATE_LINE_X;
 export const PLATFORM_CENTER_X = 0;
 export const MAIN_QUEUE_STOP_X = INSIDE_MAIN_QUEUE_STOP_X;
-export const MAIN_QUEUE_STOP_Z = 2.0;
-export const SINGLE_QUEUE_STOP_X = INSIDE_SINGLE_QUEUE_STOP_X;
-export const SINGLE_QUEUE_STOP_Z = -2.0;
+export const MAIN_QUEUE_STOP_Z = 3.0;
+export const SINGLE_QUEUE_STOP_X = 0;
+export const SINGLE_QUEUE_STOP_Z = -3.0;
 
-export const CONSOLE_POS = { x: 0, y: 0, z: 5.5 };
+export const CONSOLE_POS = { x: -1.9, y: 0, z: 1.3 };
 
-// Unified radiant highlight color for all queues
-export const QUEUE_HIGHLIGHT_COLOR = '#fbbf24';
 
 export const NPC_PALETTES = [
   '#ef4444', // Red
@@ -102,3 +98,8 @@ export const DIFFICULTY_PRESETS: Record<string, DifficultyConfig> = {
     singleRiderSpawnRate: 0.25,
   },
 };
+
+export const TRACK_LAYOUT = {
+  inside: { trackX: INSIDE_TRACK_X, gateX: INSIDE_GATE_LINE_X, queueX: INSIDE_MAIN_QUEUE_STOP_X, direction: -1, color: '#fbbf24' },
+  outside: { trackX: OUTSIDE_TRACK_X, gateX: OUTSIDE_GATE_LINE_X, queueX: OUTSIDE_MAIN_QUEUE_STOP_X, direction: 1, color: '#38bdf8' },
+} as const;
