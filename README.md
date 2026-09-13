@@ -2,7 +2,7 @@
 
 A browser-based 3D ride-station simulator. Manage queues, group guests, check restraints, and dispatch trains across two tracks.
 
-Play at **https://tristanhaha.github.io/grouper/**.
+**[Play Grouper in your browser](https://tristanhaha.github.io/grouper/)**
 
 ## Run locally
 
