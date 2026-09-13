@@ -1,20 +1,33 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+﻿# Grouper
 
-# Run and deploy your AI Studio app
+A browser-based 3D ride-station simulator. Manage queues, group guests, check restraints, and dispatch trains across two tracks.
 
-This contains everything you need to run your app locally.
+Play at **https://tristanhaha.github.io/grouper/**.
 
-View your app in AI Studio: https://ai.studio/apps/00ad558f-14f6-44d6-bafd-970f1009099e
+## Run locally
 
-## Run Locally
+Use Node 24.20.0 (pinned in `.nvmrc`):
 
-**Prerequisites:**  Node.js
+```sh
+npm ci
+npm run dev
+```
 
+Open `http://localhost:3000/grouper/`. No API key or backend is required. On Windows PowerShell with script execution disabled, use `npm.cmd` instead of `npm`.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Validate and build
+
+```sh
+npm run lint
+npm test
+npm run build
+npm run preview
+```
+
+The app requires a browser with WebGL support. Keyboard/mouse and supported gamepads control the simulation.
+
+## GitHub Pages
+
+Pushes to `main` run type checking, the simulation tests, and a production build before publishing `dist/` through `.github/workflows/pages.yml`. Pull requests run the build checks without deploying. You can also deploy manually from GitHub Actions.
+
+Vite uses `/grouper/` as the base path so the built assets load on the project site. The app runs entirely in the browser; deployment does not include local environment files or require repository secrets.
